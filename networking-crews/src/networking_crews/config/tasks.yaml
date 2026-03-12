@@ -1,0 +1,207 @@
+# === DISCOVERY CREW TASKS ===
+
+filter_events:
+  description: >
+    Filter and enrich the list of raw events.
+
+    Raw events (already parsed and deduplicated): {raw_events}
+    User context: {context}
+
+    For each event:
+    1. Evaluate relevance to user interests.
+    2. Use PerplexitySearch to find additional info about organizers: repeat events, reviews, speakers.
+    3. Determine event type: conference | meetup | workshop | networking_dinner | other.
+    4. Determine the event language from description.
+    5. Estimate approximate number of participants.
+    6. Remove clearly irrelevant: wrong topic, outdated, suspicious, spam.
+
+    Return only events that are potentially interesting to the user.
+  expected_output: >
+    JSON with a list of filtered events, each with fields:
+    event_type, detected_language, organizer_info, relevance_note, estimated_audience
+  agent: scout_agent
+  output_pydantic: ScoutOutput
+
+score_events:
+  description: >
+    Calculate semantic score (40% of total) for each event and form a ranking.
+
+    User context: {context}
+    Deterministic scores (60%) are already calculated and included in each event's data.
+
+    For each event calculate:
+    1. Topic relevance (0-25 points): semantic comparison of event description
+       with user interests from context. Consider not only direct matches,
+       but also related topics.
+    2. Organizer quality (0-10 points): based on organizer_info from Scout Agent,
+       number of participants, repeat events.
+    3. Hidden costs / dress code (0-5 points): analyze description for implicit costs
+       (dress code, food not included, paid parking, etc.). 5 = no hidden costs.
+
+    total_score = deterministic_score + semantic_score (relevance + organizer + hidden)
+
+    Recommendation:
+    - 80-100: "strong_recommend"
+    - 60-79: "suitable"
+    - 40-59: "borderline"
+    - 0-39: "skip"
+
+    Return all events sorted by total_score (desc), and separately top-5.
+  expected_output: >
+    JSON with full ranked list and separate top-5, each event with
+    total_score, semantic_score, recommendation, recommendation_reason
+  agent: analyst_agent
+  output_pydantic: AnalystOutput
+  context:
+    - filter_events
+
+# === BOOKING CREW TASKS ===
+
+coordinate_booking:
+  description: >
+    Coordinate user registration for an event.
+
+    Event: {event}
+    User profile: {user_profile}
+
+    1. Analyze which fields are needed for registration for this event type
+       (Luma usually: name, email; Meetup: RSVP; some require: company, role).
+    2. Check via UserProfileTool: is all data present in the profile.
+    3. If something is missing - return a list of missing_fields.
+    4. If everything is present - form booking_instruction with data for form filling.
+    5. On booking confirmation - create Google Calendar event:
+       - Event title
+       - Date/time
+       - Address
+       - Reminders: 24 hours and 2 hours before
+       - In description: event link + challenge (if any)
+  expected_output: >
+    JSON with: status (ready/missing_fields), missing_fields list,
+    booking_instruction dict, calendar_event_id
+  agent: booker_agent
+  output_pydantic: BookingCoordinationResult
+
+generate_challenge:
+  description: >
+    Generate a personalized networking challenge for the booked event.
+
+    Event: {event}
+    Context: {context}
+
+    1. Use MethodologyDBTool to find 2-3 suitable methodologies:
+       - By semantic similarity to event description and type
+       - With filter by user level (from context: number of completed challenges)
+       - Exclude already used (from context: challenge history)
+    2. Choose the best methodology and generate a specific challenge:
+       - Task description (2-3 sentences, specific actions)
+       - Success metrics (2-3 measurable criteria)
+       - Execution tips (3-5 practical advice)
+    3. Account for progression: if user is beginner - simple techniques,
+       if intermediate/advanced - more complex ones.
+  expected_output: >
+    JSON with challenge: methodology_name, description, success_metrics, tips, difficulty
+  agent: coach_agent
+  output_pydantic: CoachOutput
+  context:
+    - coordinate_booking
+
+# === DEBRIEF CREW TASKS ===
+
+calculate_roi:
+  description: >
+    Calculate event ROI and update statistics.
+
+    Debrief data: {debrief_data}
+    Context: {context}
+
+    Formulas:
+    - ROI Score = (contacts_count x contacts_quality_avg x user_rating) / actual_cost
+    - If actual_cost = 0 (free event), use 0.5 as divisor
+
+    1. Calculate ROI Score.
+    2. Compare forecast (from event.total_estimated_cost) vs actual costs.
+    3. Calculate aggregated metrics for current period:
+       - Average event cost
+       - Average ROI
+       - Best event type by ROI
+       - Trend: improving/stable/declining (compare with previous period)
+    4. If event is free and highly rated - mark as "high value free event".
+  expected_output: >
+    JSON with ROI report and aggregated statistics
+  agent: finance_agent
+  output_pydantic: ROIReport
+
+evaluate_challenge:
+  description: >
+    Evaluate challenge completion and suggest the next step.
+
+    Debrief data: {debrief_data}
+    Context: {context}
+    ROI data: taken from the previous task
+
+    1. Compare challenge success metrics with actual debrief results.
+    2. Determine status: completed / partially_completed / failed / skipped.
+    3. Give constructive feedback (2-3 sentences).
+    4. Suggest the next step for skill development.
+    5. If user crossed a threshold - suggest increasing difficulty level.
+  expected_output: >
+    JSON with challenge evaluation, feedback and next step recommendation
+  agent: coach_agent
+  context:
+    - calculate_roi
+
+# === ONBOARDING CREW TASK ===
+
+collect_profile:
+  description: >
+    Collect a new user's profile through a friendly dialogue.
+
+    Current data (if any): {existing_data}
+
+    Required fields:
+    - name: user name
+    - current_city: current city
+    - interests: list of interests/topics (AI, startups, SaaS, crypto, marketing, etc.)
+    - budget_limit_ticket: maximum ticket price in EUR
+    - budget_limit_transport: maximum transport cost in EUR
+
+    Optional fields (can skip):
+    - email
+    - linkedin_url
+    - company + role
+    - preferred_languages: event languages (default: ["en"])
+    - preferred_time: morning/afternoon/evening/any (default: "any")
+    - planned_locations: planned relocations
+
+    Rules:
+    - Start with a short greeting (2-3 sentences about what the bot does)
+    - Group questions (not one field at a time)
+    - Maximum 5-6 messages for the entire dialogue
+    - If user skips an optional field - don't insist
+  expected_output: >
+    JSON with filled user profile
+  agent: onboarding_agent
+  output_pydantic: OnboardingResult
+
+# === WEEKLY REPORT TASK ===
+
+weekly_summary:
+  description: >
+    Generate a weekly summary of networking activity.
+
+    Context: {context}
+    Period: {period}
+
+    Include:
+    1. Number of events attended this week
+    2. Total costs (EUR)
+    3. Average ROI Score
+    4. Best event of the week (by ROI)
+    5. Number of new contacts
+    6. Challenge progress (completed / assigned)
+    7. Trend compared to last week
+    8. Recommendation for next week (1-2 sentences)
+  expected_output: >
+    JSON with full weekly statistics
+  agent: finance_agent
+  output_pydantic: AggregatedStats
