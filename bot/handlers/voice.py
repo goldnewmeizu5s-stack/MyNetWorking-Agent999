@@ -7,6 +7,8 @@ import httpx
 from aiogram import Router
 from aiogram.types import Message
 
+from bot.keyboards import get_main_keyboard
+
 router = Router()
 
 
@@ -23,31 +25,63 @@ async def handle_voice(message: Message, bot, **kwargs):
     text = await _transcribe(file_data)
 
     if not text:
-        await message.answer("Sorry, couldn't understand the voice message.")
+        await message.answer(
+            "Sorry, couldn't understand the voice message.",
+            reply_markup=get_main_keyboard(),
+        )
         return
+
+    await message.answer(f"Heard: \"{text}\"")
 
     # Route by intent
     text_lower = text.lower()
 
-    if any(kw in text_lower for kw in ["event", "meetup", "conference"]):
-        await message.answer(f"Heard: '{text}'\nUse /events to search for events.")
-    elif any(kw in text_lower for kw in ["debrief", "how was", "review"]):
-        await message.answer(f"Heard: '{text}'\nUse /debrief to review your last event.")
-    elif any(kw in text_lower for kw in ["location", "city", "move"]):
-        await message.answer(f"Heard: '{text}'\nUse /location to update your city.")
-    elif any(kw in text_lower for kw in ["stats", "report", "summary"]):
-        await message.answer(f"Heard: '{text}'\nUse /stats to see your weekly report.")
-    elif any(kw in text_lower for kw in ["challenge", "task"]):
-        await message.answer(f"Heard: '{text}'\nUse /challenge to see your current challenge.")
+    if any(kw in text_lower for kw in [
+        "event", "events", "meetup", "conference", "найди", "ивент", "поиск", "search",
+    ]):
+        from bot.handlers.events import handle_events
+        await handle_events(message, **kwargs)
+
+    elif any(kw in text_lower for kw in [
+        "settings", "настройки", "профиль", "profile",
+    ]):
+        from bot.handlers.settings import handle_settings
+        await handle_settings(message, **kwargs)
+
+    elif any(kw in text_lower for kw in [
+        "stats", "статистика", "report", "summary", "отчёт", "отчет",
+    ]):
+        from bot.handlers.stats import handle_stats
+        await handle_stats(message, **kwargs)
+
+    elif any(kw in text_lower for kw in [
+        "challenge", "задание", "task", "челлендж",
+    ]):
+        from bot.handlers.challenge import handle_challenge
+        await handle_challenge(message, **kwargs)
+
+    elif any(kw in text_lower for kw in [
+        "contact", "contacts", "контакты",
+    ]):
+        from bot.handlers.contacts import handle_contacts
+        await handle_contacts(message, **kwargs)
+
+    elif any(kw in text_lower for kw in [
+        "location", "city", "город", "локация", "move",
+    ]):
+        from bot.handlers.settings import handle_location
+        await handle_location(message, **kwargs)
+
+    elif any(kw in text_lower for kw in [
+        "debrief", "how was", "review", "как прошло",
+    ]):
+        from bot.handlers.debrief import handle_debrief_start
+        await handle_debrief_start(message, **kwargs)
+
     else:
         await message.answer(
-            f"Heard: '{text}'\n\n"
-            "Available commands:\n"
-            "/events - find events\n"
-            "/debrief - review last event\n"
-            "/stats - weekly stats\n"
-            "/challenge - current challenge\n"
-            "/settings - your profile"
+            "I didn't recognize a command. Use the buttons below:",
+            reply_markup=get_main_keyboard(),
         )
 
 

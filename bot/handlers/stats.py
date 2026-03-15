@@ -4,11 +4,13 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from bot.keyboards import get_main_keyboard
+
 router = Router()
 
 
 @router.message(Command("stats"))
-async def handle_stats(message: Message, db):
+async def handle_stats(message: Message, db, **kwargs):
     user_id = message.from_user.id
     await message.answer("Generating your stats...")
 
@@ -25,7 +27,10 @@ async def handle_stats(message: Message, db):
             f"Spent this month: EUR{budget.get('spent_this_month', 0):.2f}\n"
             f"Remaining: EUR{budget.get('remaining', 0):.2f}"
         )
-        await message.answer(text, parse_mode="HTML")
+        await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
     except Exception:
-        await message.answer("Could not load stats. Try again later.")
+        await message.answer(
+            "Could not load stats. Try again later.",
+            reply_markup=get_main_keyboard(),
+        )

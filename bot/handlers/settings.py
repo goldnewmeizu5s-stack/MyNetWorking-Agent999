@@ -6,6 +6,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
+from bot.keyboards import get_main_keyboard
+
 router = Router()
 
 
@@ -17,12 +19,15 @@ class SettingsStates(StatesGroup):
 
 
 @router.message(Command("settings"))
-async def handle_settings(message: Message, db):
+async def handle_settings(message: Message, db, **kwargs):
     user_id = message.from_user.id
     profile = await db.get_user_profile(user_id)
 
     if not profile:
-        await message.answer("Please run /start first to set up your profile.")
+        await message.answer(
+            "Please run /start first to set up your profile.",
+            reply_markup=get_main_keyboard(),
+        )
         return
 
     text = (
@@ -39,11 +44,11 @@ async def handle_settings(message: Message, db):
         "/interests - update interests\n"
         "/budget - update budget limits"
     )
-    await message.answer(text, parse_mode="HTML")
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
 
 
 @router.message(Command("location"))
-async def handle_location(message: Message, state: FSMContext):
+async def handle_location(message: Message, state: FSMContext, **kwargs):
     await state.set_state(SettingsStates.waiting_location)
     await message.answer(
         "What city are you in? (e.g., Lisbon, Berlin, London)"
@@ -51,18 +56,21 @@ async def handle_location(message: Message, state: FSMContext):
 
 
 @router.message(SettingsStates.waiting_location)
-async def process_location(message: Message, state: FSMContext, db):
+async def process_location(message: Message, state: FSMContext, db, **kwargs):
     city = message.text.strip()
     user_id = message.from_user.id
 
     # Geocoding would happen here in production
     await db.update_user_city(user_id, city, lat=0.0, lon=0.0)
     await state.clear()
-    await message.answer(f"Location updated to {city}!")
+    await message.answer(
+        f"Location updated to {city}!",
+        reply_markup=get_main_keyboard(),
+    )
 
 
 @router.message(Command("interests"))
-async def handle_interests(message: Message, state: FSMContext):
+async def handle_interests(message: Message, state: FSMContext, **kwargs):
     await state.set_state(SettingsStates.waiting_interests)
     await message.answer(
         "What topics interest you?\n"
@@ -71,17 +79,20 @@ async def handle_interests(message: Message, state: FSMContext):
 
 
 @router.message(SettingsStates.waiting_interests)
-async def process_interests(message: Message, state: FSMContext, db):
+async def process_interests(message: Message, state: FSMContext, db, **kwargs):
     interests = [i.strip() for i in message.text.split(",") if i.strip()]
     user_id = message.from_user.id
 
     await db.update_user_interests(user_id, interests)
     await state.clear()
-    await message.answer(f"Interests updated: {', '.join(interests)}")
+    await message.answer(
+        f"Interests updated: {', '.join(interests)}",
+        reply_markup=get_main_keyboard(),
+    )
 
 
 @router.message(Command("budget"))
-async def handle_budget(message: Message, state: FSMContext):
+async def handle_budget(message: Message, state: FSMContext, **kwargs):
     await state.set_state(SettingsStates.waiting_budget_ticket)
     await message.answer(
         "What's your max ticket price in EUR? (e.g., 50)"
@@ -90,7 +101,7 @@ async def handle_budget(message: Message, state: FSMContext):
 
 @router.message(SettingsStates.waiting_budget_ticket)
 async def process_budget_ticket(
-    message: Message, state: FSMContext
+    message: Message, state: FSMContext, **kwargs
 ):
     try:
         amount = float(message.text.strip())
@@ -107,7 +118,7 @@ async def process_budget_ticket(
 
 @router.message(SettingsStates.waiting_budget_transport)
 async def process_budget_transport(
-    message: Message, state: FSMContext, db
+    message: Message, state: FSMContext, db, **kwargs
 ):
     try:
         amount = float(message.text.strip())
@@ -127,5 +138,6 @@ async def process_budget_transport(
     await message.answer(
         f"Budget updated!\n"
         f"Ticket: EUR{data['budget_ticket']}\n"
-        f"Transport: EUR{amount}"
+        f"Transport: EUR{amount}",
+        reply_markup=get_main_keyboard(),
     )

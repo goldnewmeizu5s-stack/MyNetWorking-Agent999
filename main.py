@@ -86,15 +86,23 @@ async def main():
 
     # Register optional routers
     try:
-        from bot.handlers import booking, challenge, contacts, debrief, settings, stats
+        from bot.handlers import booking, challenge, contacts, debrief, settings, stats, voice
         dp.include_router(booking.router)
         dp.include_router(debrief.router)
         dp.include_router(settings.router)
         dp.include_router(stats.router)
         dp.include_router(contacts.router)
         dp.include_router(challenge.router)
+        dp.include_router(voice.router)
     except Exception as e:
         logger.warning("Some optional handlers not loaded: %s", e)
+
+    # Menu button handler - must be LAST to not intercept FSM states
+    try:
+        from bot.handlers import menu
+        dp.include_router(menu.router)
+    except Exception as e:
+        logger.warning("Menu handler not loaded: %s", e)
 
     logger.info("Bot starting...")
 
