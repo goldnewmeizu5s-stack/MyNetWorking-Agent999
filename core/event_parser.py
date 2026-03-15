@@ -32,9 +32,10 @@ class EventParser:
     ) -> list[dict]:
         # Check cache
         cache_key = f"events:cache:{city}:{date_from}"
-        cached = await self.cache.get(cache_key)
-        if cached:
-            return json.loads(cached)
+        if self.cache:
+            cached = await self.cache.get(cache_key)
+            if cached:
+                return json.loads(cached)
 
         raw_events: list[dict] = []
 
@@ -52,7 +53,8 @@ class EventParser:
         unique = self._deduplicate(raw_events)
 
         # Cache for 6 hours
-        await self.cache.setex(cache_key, 3600 * 6, json.dumps(unique, default=str))
+        if self.cache:
+            await self.cache.setex(cache_key, 3600 * 6, json.dumps(unique, default=str))
 
         return unique
 

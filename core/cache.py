@@ -18,6 +18,8 @@ class CacheManager:
     async def get_transport(
         self, origin: str, dest: str, date_str: str
     ) -> dict | None:
+        if not self.redis:
+            return None
         key = f"transport:{origin}:{dest}:{date_str}"
         data = await self.redis.get(key)
         return json.loads(data) if data else None
@@ -25,10 +27,14 @@ class CacheManager:
     async def set_transport(
         self, origin: str, dest: str, date_str: str, data: dict
     ) -> None:
+        if not self.redis:
+            return
         key = f"transport:{origin}:{dest}:{date_str}"
         await self.redis.setex(key, 3600 * 6, json.dumps(data))
 
     async def get_currency(self, from_cur: str, to_cur: str) -> float | None:
+        if not self.redis:
+            return None
         key = f"currency:{from_cur}:{to_cur}"
         data = await self.redis.get(key)
         return float(data) if data else None
@@ -36,10 +42,14 @@ class CacheManager:
     async def set_currency(
         self, from_cur: str, to_cur: str, rate: float
     ) -> None:
+        if not self.redis:
+            return
         key = f"currency:{from_cur}:{to_cur}"
         await self.redis.setex(key, 3600 * 24, str(rate))
 
     async def get_user_location(self, user_id: int) -> dict | None:
+        if not self.redis:
+            return None
         key = f"user:{user_id}:location"
         data = await self.redis.get(key)
         return json.loads(data) if data else None
@@ -47,5 +57,7 @@ class CacheManager:
     async def set_user_location(
         self, user_id: int, location: dict
     ) -> None:
+        if not self.redis:
+            return
         key = f"user:{user_id}:location"
         await self.redis.set(key, json.dumps(location))

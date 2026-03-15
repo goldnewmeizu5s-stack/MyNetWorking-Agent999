@@ -95,7 +95,15 @@ async def handle_contacts(
     context = await context_builder.build(user_id)
 
     try:
-        result = await crewai_client.run_debrief(debrief_data, context)
+        result = await crewai_client.run_crew({
+            "debrief_data": json.dumps(debrief_data, ensure_ascii=False, default=str),
+            "context": json.dumps(context, ensure_ascii=False, default=str),
+            "raw_events": "[]",
+            "period": "",
+            "event": "any",
+            "existing_data": "[]",
+            "user_profile": "{}",
+        })
         output = json.loads(result["output"])
 
         # Save result to DB
