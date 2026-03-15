@@ -4,19 +4,9 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.handlers import (
-    booking,
-    challenge,
-    contacts,
-    debrief,
-    events,
-    settings,
-    start,
-    stats,
-    voice,
-)
+from bot.handlers import events, start
 from bot.middleware import DependencyMiddleware, LoggingMiddleware
 from config import Config
 from core.cache import CacheManager
@@ -28,7 +18,6 @@ from core.event_parser import EventParser
 from core.preference_learner import PreferenceLearner
 from db.postgres import Database
 from db.redis import RedisCache
-from scheduler import SchedulerManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,10 +32,19 @@ async def main():
     # Initialize database
     db = Database(config.database_url)
     await db.init_db()
+    logger.info("Database initialized")
 
-    # Initialize Redis
-    redis = RedisCache(config.redis_url)
-    await redis.connect()
+    # Initialize Redis (fallback to None if unavailable)
+    redis = None
+    storage = MemoryStorage()
+    try:
+        redis = RedisCache(config.redis_url)
+        await redis.connect()
+        from aiogram.fsm.storage.redis import RedisStorage
+        storage = RedisStorage.from_url(config.redis_url)
+        logger.info("Redis connected")
+    except Exception as e:
+        logger.warning("Redis unavailable, using MemoryStorage: %s", e)
 
     # Initialize core services
     crewai_client = CrewAIClient(
@@ -62,7 +60,6 @@ async def main():
 
     # Initialize bot
     bot = Bot(token=config.telegram_bot_token)
-    storage = RedisStorage.from_url(config.redis_url)
     dp = Dispatcher(storage=storage)
 
     # Register middleware
@@ -83,37 +80,30 @@ async def main():
     dp.message.middleware(DependencyMiddleware(dependencies))
     dp.callback_query.middleware(DependencyMiddleware(dependencies))
 
-    # Register routers
+    # Register MVP routers
     dp.include_router(start.router)
     dp.include_router(events.router)
-    dp.include_router(booking.router)
-    dp.include_router(debrief.router)
-    dp.include_router(settings.router)
-    dp.include_router(stats.router)
-    dp.include_router(contacts.router)
-    dp.include_router(challenge.router)
-    dp.include_router(voice.router)
 
-    # Initialize scheduler
-    scheduler_manager = SchedulerManager(
-        db=db,
-        redis=redis,
-        crewai_client=crewai_client,
-        context_builder=context_builder,
-        event_parser=event_parser,
-        scorer=scorer,
-        bot=bot,
-    )
-    scheduler_manager.start()
+    # Register optional routers
+    try:
+        from bot.handlers import booking, challenge, contacts, debrief, settings, stats
+        dp.include_router(booking.router)
+        dp.include_router(debrief.router)
+        dp.include_router(settings.router)
+        dp.include_router(stats.router)
+        dp.include_router(contacts.router)
+        dp.include_router(challenge.router)
+    except Exception as e:
+        logger.warning("Some optional handlers not loaded: %s", e)
 
     logger.info("Bot starting...")
 
     try:
         await dp.start_polling(bot)
     finally:
-        scheduler_manager.stop()
         await crewai_client.close()
-        await redis.close()
+        if redis:
+            await redis.close()
         await db.close()
         await bot.session.close()
 

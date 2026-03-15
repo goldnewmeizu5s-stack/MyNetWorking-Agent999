@@ -17,7 +17,7 @@ class Config:
     # CrewAI Platform
     crewai_platform_url: str = field(
         default_factory=lambda: os.environ.get(
-            "CREWAI_PLATFORM_URL", "https://app.crewai.com/api"
+            "CREWAI_PLATFORM_URL", ""
         )
     )
     crewai_bearer_token: str = field(
@@ -36,7 +36,7 @@ class Config:
 
     # Defaults
     default_city: str = field(
-        default_factory=lambda: os.environ.get("DEFAULT_CITY", "Lisbon")
+        default_factory=lambda: os.environ.get("DEFAULT_CITY", "Tbilisi")
     )
     default_radius_km: int = field(
         default_factory=lambda: int(
