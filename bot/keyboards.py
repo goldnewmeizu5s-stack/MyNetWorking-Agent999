@@ -11,9 +11,7 @@ from aiogram.types import (
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🔍 Events"), KeyboardButton(text="📍 Location")],
-            [KeyboardButton(text="⚙️ Settings"), KeyboardButton(text="📊 Stats")],
-            [KeyboardButton(text="🎯 Challenge"), KeyboardButton(text="📇 Contacts")],
+            [KeyboardButton(text="🔍 Events"), KeyboardButton(text="⚙️ Settings")],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -62,6 +60,22 @@ def get_confirm_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="Yes", callback_data="confirm:yes"),
                 InlineKeyboardButton(text="No", callback_data="confirm:no"),
+            ]
+        ]
+    )
+
+
+def get_booking_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Confirm or edit registration brief."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Confirm", callback_data="booking_brief:confirm"
+                ),
+                InlineKeyboardButton(
+                    text="Edit", callback_data="booking_brief:edit"
+                ),
             ]
         ]
     )
