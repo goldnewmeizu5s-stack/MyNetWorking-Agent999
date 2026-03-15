@@ -405,6 +405,53 @@ class Database:
             )
             await session.commit()
 
+    # -- Registration data --
+
+    async def get_registration_data(self, user_id: int) -> dict:
+        """Get accumulated registration data for auto-fill."""
+        profile = await self.get_user_profile(user_id)
+        if not profile:
+            return {}
+        # Merge profile fields + explicit registration_data
+        base = {
+            "name": profile.name,
+            "email": profile.email,
+            "company": profile.company,
+            "role": profile.role,
+            "phone": profile.phone,
+            "linkedin_url": profile.linkedin_url,
+            "city": profile.current_city,
+        }
+        # registration_data overrides with extra fields (age, job_title, etc.)
+        extra = profile.registration_data or {}
+        base.update(extra)
+        # Remove None values
+        return {k: v for k, v in base.items() if v}
+
+    async def update_registration_data(
+        self, user_id: int, new_fields: dict
+    ) -> None:
+        """Merge new fields into registration_data JSONB."""
+        async with self.session_factory() as session:
+            profile = await session.get(UserProfile, user_id)
+            if profile:
+                current = profile.registration_data or {}
+                current.update(new_fields)
+                profile.registration_data = current
+                # Also update top-level fields if they match
+                field_map = {
+                    "name": "name",
+                    "email": "email",
+                    "company": "company",
+                    "role": "role",
+                    "phone": "phone",
+                    "linkedin_url": "linkedin_url",
+                }
+                for reg_key, col_key in field_map.items():
+                    if reg_key in new_fields and new_fields[reg_key]:
+                        setattr(profile, col_key, new_fields[reg_key])
+                await session.commit()
+
     # -- Crew runs --
 
     async def log_crew_run(

@@ -65,6 +65,22 @@ def get_confirm_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def get_booking_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Confirm or edit registration brief."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Confirm", callback_data="booking_brief:confirm"
+                ),
+                InlineKeyboardButton(
+                    text="Edit", callback_data="booking_brief:edit"
+                ),
+            ]
+        ]
+    )
+
+
 def get_debrief_cost_keyboard(estimated_cost: float) -> InlineKeyboardMarkup:
     """Keyboard to confirm or update actual costs."""
     return InlineKeyboardMarkup(
