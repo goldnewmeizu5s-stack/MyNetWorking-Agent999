@@ -8,7 +8,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from bot.formatters import format_event_card
-from bot.keyboards import get_event_keyboard
+from bot.keyboards import get_event_keyboard, get_main_keyboard
 
 router = Router()
 
@@ -22,6 +22,7 @@ async def handle_events(
     scorer,
     db,
     crew_tracker,
+    **kwargs,
 ):
     user_id = message.from_user.id
     await message.answer("Searching for events...")
@@ -30,7 +31,8 @@ async def handle_events(
     context = await context_builder.build(user_id)
     if not context.get("user_profile", {}).get("current_city"):
         await message.answer(
-            "Please set your location first with /location"
+            "Please set your location first with /location",
+            reply_markup=get_main_keyboard(),
         )
         return
 
@@ -46,7 +48,8 @@ async def handle_events(
 
     if not raw_events:
         await message.answer(
-            "No events found in your city for the next 2 weeks."
+            "No events found in your city for the next 2 weeks.",
+            reply_markup=get_main_keyboard(),
         )
         return
 
@@ -76,7 +79,10 @@ async def handle_events(
 
     # 6. Show to user
     if not top_events:
-        await message.answer("No suitable events found after analysis.")
+        await message.answer(
+            "No suitable events found after analysis.",
+            reply_markup=get_main_keyboard(),
+        )
         return
 
     total_filtered = output.get("total_filtered", len(raw_events))

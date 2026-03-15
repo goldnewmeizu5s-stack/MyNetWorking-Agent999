@@ -1,6 +1,23 @@
-"""Inline keyboard builders for Telegram bot."""
+"""Keyboard builders for Telegram bot."""
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
+
+
+def get_main_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🔍 Events"), KeyboardButton(text="📍 Location")],
+            [KeyboardButton(text="⚙️ Settings"), KeyboardButton(text="📊 Stats")],
+            [KeyboardButton(text="🎯 Challenge"), KeyboardButton(text="📇 Contacts")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 def get_event_keyboard(source_id: str) -> InlineKeyboardMarkup:

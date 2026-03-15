@@ -4,6 +4,8 @@ from aiogram import Router
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 
+from bot.keyboards import get_main_keyboard
+
 router = Router()
 
 
@@ -15,7 +17,8 @@ async def handle_start(message: Message, db):
     if profile and profile.onboarding_complete:
         await message.answer(
             "Welcome back! Use /events to find networking events, "
-            "or /settings to update your profile."
+            "or /settings to update your profile.",
+            reply_markup=get_main_keyboard(),
         )
         return
 
@@ -39,5 +42,6 @@ async def handle_start(message: Message, db):
         "I find relevant events, score them, and help you decide what to attend.\n\n"
         f"Profile created for {message.from_user.full_name} (Tbilisi).\n"
         "Use /events to find networking events!\n"
-        "Use /settings to update your profile."
+        "Use /settings to update your profile.",
+        reply_markup=get_main_keyboard(),
     )

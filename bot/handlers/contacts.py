@@ -4,18 +4,21 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from bot.keyboards import get_main_keyboard
+
 router = Router()
 
 
 @router.message(Command("contacts"))
-async def handle_contacts(message: Message, db):
+async def handle_contacts(message: Message, db, **kwargs):
     user_id = message.from_user.id
 
     contacts = await db.get_all_contacts(user_id)
 
     if not contacts:
         await message.answer(
-            "No contacts yet. Attend some events and do a /debrief!"
+            "No contacts yet. Attend some events and do a /debrief!",
+            reply_markup=get_main_keyboard(),
         )
         return
 
@@ -35,4 +38,4 @@ async def handle_contacts(message: Message, db):
             line += f"\n   (met at: {event_title})"
         text += line + "\n"
 
-    await message.answer(text, parse_mode="HTML")
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
