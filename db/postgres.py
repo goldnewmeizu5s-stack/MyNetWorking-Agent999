@@ -42,6 +42,24 @@ class Database:
         """Create all tables."""
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # Create learned_preferences table (not in SQLAlchemy models)
+            from sqlalchemy import text
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS learned_preferences (
+                    preference_id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    preference_type VARCHAR(50),
+                    preference_value TEXT,
+                    confidence DOUBLE PRECISION DEFAULT 0.3,
+                    evidence_count INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_preferences_user
+                ON learned_preferences(user_id)
+            """))
 
     async def close(self):
         await self.engine.dispose()

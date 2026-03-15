@@ -28,11 +28,15 @@ async def handle_booking(
         return
 
     # 2. Run BookingCrew on CrewAI Platform
-    crew_result = await crewai_client.run_booking(
-        event=event.to_dict(),
-        user_profile=user_profile.to_dict(),
-        context=context,
-    )
+    crew_result = await crewai_client.run_crew({
+        "event": json.dumps(event.to_dict(), ensure_ascii=False, default=str),
+        "user_profile": json.dumps(user_profile.to_dict(), ensure_ascii=False, default=str),
+        "context": json.dumps(context, ensure_ascii=False, default=str),
+        "raw_events": "[]",
+        "debrief_data": "[]",
+        "period": "",
+        "existing_data": "[]",
+    })
     booking_data = json.loads(crew_result["output"])
 
     # 3. Check: are additional fields needed?
