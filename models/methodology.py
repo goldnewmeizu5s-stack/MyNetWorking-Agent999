@@ -1,6 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from pgvector.sqlalchemy import Vector
 
 from models.user import Base
 
@@ -16,4 +15,4 @@ class Methodology(Base):
     event_types = Column(JSONB, default=["any"])
     difficulty = Column(String(20))
     skills = Column(JSONB, default=[])
-    embedding = Column(Vector(1536))
+    # embedding column deferred to Phase 5 (requires pgvector extension)
