@@ -1,18 +1,14 @@
 """Handler for /events command - triggers DiscoveryCrew."""
-
 import json
+import logging
 from datetime import date, timedelta
-
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-
 from bot.formatters import format_event_card
 from bot.keyboards import get_event_keyboard, get_main_keyboard
-
+logger = logging.getLogger(__name__)
 router = Router()
-
-
 @router.message(Command("events"))
 async def handle_events(
     message: Message,
@@ -25,8 +21,7 @@ async def handle_events(
     **kwargs,
 ):
     user_id = message.from_user.id
-    await message.answer("Searching for events...")
-
+    await message.answer("🔍 Searching for events...")
     # 1. Build context (Python, no LLM)
     context = await context_builder.build(user_id)
     if not context.get("user_profile", {}).get("current_city"):
@@ -35,25 +30,22 @@ async def handle_events(
             reply_markup=get_main_keyboard(),
         )
         return
-
-    # 2. Parse events (Python, no LLM)
-    raw_events = await event_parser.parse_all(
-        city=context["current_location"]["city"],
-        lat=context["current_location"]["lat"],
-        lon=context["current_location"]["lon"],
-        date_from=date.today(),
-        date_to=date.today() + timedelta(days=14),
-        categories=context["user_profile"].get("interests", []),
-    )
-
-    if not raw_events:
-        await message.answer(
-            "No events found in your city for the next 2 weeks.",
-            reply_markup=get_main_keyboard(),
+    city = context["current_location"]["city"]
+    # 2. Try to parse events from Luma/Meetup (Python, no LLM)
+    raw_events = []
+    try:
+        raw_events = await event_parser.parse_all(
+            city=city,
+            lat=context["current_location"]["lat"],
+            lon=context["current_location"]["lon"],
+            date_from=date.today(),
+            date_to=date.today() + timedelta(days=14),
+            categories=context["user_profile"].get("interests", []),
         )
-        return
-
-    # 3. Calculate deterministic score for each (Python, no LLM)
+        logger.info("Parsed %d raw events from Luma/Meetup", len(raw_events))
+    except Exception as e:
+        logger.warning("Event parsing failed: %s", e)
+    # 3. Calculate deterministic score for pre-parsed events
     for event in raw_events:
         event["deterministic_score"] = scorer.calculate(
             event=event,
@@ -62,35 +54,67 @@ async def handle_events(
             transport_duration_min=0,
             calendar_free=True,
         )
-
-    # 4. Run DiscoveryCrew on CrewAI Platform (LLM: Scout + Analyst)
-    result = await crew_tracker.run_and_track(
-        crew_name="discovery",
-        coro=crewai_client.run_discovery(raw_events, context),
-        user_id=user_id,
+    # 4. Run DiscoveryCrew on CrewAI Platform
+    # Scout will SEARCH for events via Perplexity + use any pre-parsed events
+    await message.answer(
+        f"🤖 AI is searching for events in {city}... This may take 30-60 seconds."
     )
-
-    # 5. Parse result and save to DB
-    output = json.loads(result["output"])
-    top_events = output.get("top_events", [])
-
-    for event_data in top_events:
-        await db.upsert_event(user_id, event_data)
-
-    # 6. Show to user
-    if not top_events:
+    try:
+        result = await crew_tracker.run_and_track(
+            crew_name="discovery",
+            coro=crewai_client.run_discovery(raw_events, context),
+            user_id=user_id,
+        )
+    except Exception as e:
+        logger.error("CrewAI discovery failed: %s", e)
         await message.answer(
-            "No suitable events found after analysis.",
+            "Sorry, event search failed. Please try again later.",
             reply_markup=get_main_keyboard(),
         )
         return
-
-    total_filtered = output.get("total_filtered", len(raw_events))
+    # 5. Parse result
+    try:
+        result_data = result.get("result", {})
+        output_str = result_data.get("output", result.get("output", "{}"))
+        if isinstance(output_str, str):
+            output = json.loads(output_str)
+        else:
+            output = output_str
+        # Handle both possible response formats
+        top_events = output.get("top_events", output.get("scored_events", []))
+    except (json.JSONDecodeError, AttributeError, TypeError) as e:
+        logger.error("Failed to parse CrewAI result: %s | raw: %s", e, str(result)[:500])
+        await message.answer(
+            "Found events but couldn't parse results. Please try again.",
+            reply_markup=get_main_keyboard(),
+        )
+        return
+    # 6. Save to DB
+    for event_data in top_events:
+        try:
+            await db.upsert_event(user_id, event_data)
+        except Exception as e:
+            logger.warning("Failed to save event: %s", e)
+    # 7. Show to user
+    if not top_events:
+        await message.answer(
+            f"No events found in {city} for the next 2 weeks. "
+            "Try changing your city with /location.",
+            reply_markup=get_main_keyboard(),
+        )
+        return
     await message.answer(
-        f"Found {total_filtered} events. Here's the top {len(top_events)}:"
+        f"Found {len(top_events)} events in {city}:"
     )
-
     for event in top_events:
         card = format_event_card(event)
-        keyboard = get_event_keyboard(event["source_id"])
-        await message.answer(card, reply_markup=keyboard, parse_mode="HTML")
+        source_id = event.get("source_id", event.get("title", "unknown")[:20])
+        keyboard = get_event_keyboard(source_id)
+        try:
+            await message.answer(card, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            # Fallback without HTML if formatting fails
+            await message.answer(
+                f"{event.get('title', 'Event')}\n{event.get('source_url', '')}",
+                reply_markup=keyboard,
+            )
