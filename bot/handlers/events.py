@@ -66,12 +66,27 @@ async def handle_events(
     # 4. Run DiscoveryCrew on CrewAI Platform
     # Scout will SEARCH for events via Perplexity + use any pre-parsed events
     await message.answer(
-        f"🤖 AI is searching for events in {city}... This may take 30-60 seconds."
+        f"🤖 AI is searching for events in {city}... This may take 2-5 minutes."
     )
+    progress_messages = [
+        "⏳ Still searching... analyzing event details.",
+        "⏳ Scoring and ranking events for you...",
+        "⏳ Almost done, finalizing results...",
+    ]
+    progress_idx = 0
+
+    async def _on_progress(elapsed_sec: int):
+        nonlocal progress_idx
+        if progress_idx < len(progress_messages):
+            await message.answer(progress_messages[progress_idx])
+            progress_idx += 1
+
     try:
         result = await crew_tracker.run_and_track(
             crew_name="discovery",
-            coro=crewai_client.run_discovery(raw_events, context),
+            coro=crewai_client.run_discovery(
+                raw_events, context, on_progress=_on_progress
+            ),
             user_id=user_id,
         )
     except TimeoutError as e:
