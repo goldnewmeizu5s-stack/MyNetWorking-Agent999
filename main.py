@@ -50,6 +50,8 @@ async def main():
     crewai_client = CrewAIClient(
         base_url=config.crewai_platform_url,
         bearer_token=config.crewai_bearer_token,
+        poll_interval=config.crewai_poll_interval,
+        max_retries=config.crewai_max_retries,
     )
     context_builder = ContextBuilder(db=db, redis=redis)
     event_parser = EventParser(redis_cache=redis)

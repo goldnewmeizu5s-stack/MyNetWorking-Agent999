@@ -58,3 +58,15 @@ class Config:
             os.environ.get("PLAYWRIGHT_TIMEOUT_SEC", "60")
         )
     )
+
+    # CrewAI polling
+    crewai_poll_interval: int = field(
+        default_factory=lambda: int(
+            os.environ.get("CREWAI_POLL_INTERVAL", "5")
+        )
+    )
+    crewai_max_retries: int = field(
+        default_factory=lambda: int(
+            os.environ.get("CREWAI_MAX_RETRIES", "90")
+        )
+    )
