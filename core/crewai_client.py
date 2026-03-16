@@ -34,7 +34,7 @@ class CrewAIClient:
         logger.info("Kickoff started: %s", data.get("kickoff_id"))
         return data
 
-    async def poll_status(self, kickoff_id: str, poll_interval: int = 3, max_retries: int = 60) -> dict:
+    async def poll_status(self, kickoff_id: str, poll_interval: int = 5, max_retries: int = 60) -> dict:
         """Poll crew execution status until completed or failed."""
         for attempt in range(max_retries):
             response = await self.client.get(
