@@ -74,13 +74,20 @@ async def handle_events(
             coro=crewai_client.run_discovery(raw_events, context),
             user_id=user_id,
         )
+    except TimeoutError as e:
+        logger.error("CrewAI discovery timed out: %s", e)
+        await message.answer(
+            "⏳ The AI search took too long and timed out. "
+            "This can happen when many events are being analyzed.\n\n"
+            "Please try again with /events — it usually works on the second attempt.",
+        )
+        return
     except Exception as e:
         tb = traceback.format_exc()
         logger.error("CrewAI discovery failed: %s\n%s", e, tb)
-        error_detail = f"⚠️ CrewAI error:\n<pre>{_escape(str(e))}\n\n{_escape(tb)}</pre>"
         await message.answer(
-            error_detail[:MAX_TG_MSG],
-            parse_mode="HTML",
+            "⚠️ Something went wrong while searching for events. "
+            "Please try again later or contact support if the issue persists.",
         )
         return
     # 5. Check crew status and parse result
