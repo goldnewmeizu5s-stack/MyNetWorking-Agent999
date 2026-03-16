@@ -17,6 +17,35 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+async def _show_events(message: Message, events: list, city: str, db, user_id: int):
+    """Display event cards to the user and save to DB."""
+    if not events:
+        await message.answer(
+            f"No events found in {city} for the next 2 weeks. "
+            "Try changing your city with /location.",
+            reply_markup=get_main_keyboard(),
+        )
+        return
+    await message.answer(f"Found {len(events)} events in {city}:")
+    for event in events:
+        # Save to DB
+        try:
+            await db.upsert_event(user_id, event)
+        except Exception as e:
+            logger.warning("Failed to save event: %s", e)
+        # Show card
+        card = format_event_card(event)
+        source_id = event.get("source_id", event.get("title", "unknown")[:20])
+        keyboard = get_event_keyboard(source_id)
+        try:
+            await message.answer(card, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            await message.answer(
+                f"{event.get('title', 'Event')}\n{event.get('source_url', '')}",
+                reply_markup=keyboard,
+            )
+
+
 router = Router()
 @router.message(Command("events"))
 async def handle_events(
@@ -63,6 +92,12 @@ async def handle_events(
             transport_duration_min=0,
             calendar_free=True,
         )
+    # Sort pre-parsed events by deterministic score (fallback ranking)
+    fallback_events = sorted(
+        raw_events,
+        key=lambda e: e.get("deterministic_score", 0),
+        reverse=True,
+    )[:5]
     # 4. Run DiscoveryCrew on CrewAI Platform
     # Scout will SEARCH for events via Perplexity + use any pre-parsed events
     await message.answer(
@@ -91,30 +126,47 @@ async def handle_events(
         )
     except TimeoutError as e:
         logger.error("CrewAI discovery timed out: %s", e)
-        await message.answer(
-            "⏳ The AI search took too long and timed out. "
-            "This can happen when many events are being analyzed.\n\n"
-            "Please try again with /events — it usually works on the second attempt.",
-        )
+        if fallback_events:
+            await message.answer(
+                "⏳ AI scoring timed out, but here are events from Luma/Meetup "
+                "sorted by basic matching:"
+            )
+            await _show_events(message, fallback_events, city, db, user_id)
+        else:
+            await message.answer(
+                "⏳ The AI search took too long and timed out.\n\n"
+                "Please try again with /events.",
+            )
         return
     except Exception as e:
         tb = traceback.format_exc()
         logger.error("CrewAI discovery failed: %s\n%s", e, tb)
-        await message.answer(
-            "⚠️ Something went wrong while searching for events. "
-            "Please try again later or contact support if the issue persists.",
-        )
+        if fallback_events:
+            await message.answer(
+                "⚠️ AI scoring failed, but here are events from Luma/Meetup "
+                "sorted by basic matching:"
+            )
+            await _show_events(message, fallback_events, city, db, user_id)
+        else:
+            await message.answer(
+                "⚠️ Something went wrong while searching for events. "
+                "Please try again later.",
+            )
         return
     # 5. Check crew status and parse result
     crew_status = result.get("status", "unknown")
     if crew_status in ("failed", "error"):
         raw_preview = str(result)[:2000]
         logger.error("CrewAI returned status=%s: %s", crew_status, raw_preview)
-        error_detail = (
-            f"⚠️ CrewAI status: {crew_status}\n"
-            f"<pre>{_escape(raw_preview)}</pre>"
-        )
-        await message.answer(error_detail[:MAX_TG_MSG], parse_mode="HTML")
+        if fallback_events:
+            await message.answer(
+                "⚠️ AI scoring returned an error, showing events from Luma/Meetup:"
+            )
+            await _show_events(message, fallback_events, city, db, user_id)
+        else:
+            await message.answer(
+                "⚠️ Event search failed. Please try again later.",
+            )
         return
 
     try:
@@ -130,41 +182,27 @@ async def handle_events(
         tb = traceback.format_exc()
         raw_preview = str(result)[:1500]
         logger.error("Failed to parse CrewAI result: %s\n%s\nraw: %s", e, tb, raw_preview)
-        error_detail = (
-            f"⚠️ Parse error:\n<pre>{_escape(str(e))}</pre>"
-            f"\n\nRaw result:\n<pre>{_escape(raw_preview)}</pre>"
-        )
-        await message.answer(
-            error_detail[:MAX_TG_MSG],
-            parse_mode="HTML",
-        )
+        if fallback_events:
+            await message.answer(
+                "⚠️ Could not parse AI results, showing events from Luma/Meetup:"
+            )
+            await _show_events(message, fallback_events, city, db, user_id)
+        else:
+            await message.answer(
+                "⚠️ Could not parse event results. Please try again.",
+            )
         return
-    # 6. Save to DB
-    for event_data in top_events:
-        try:
-            await db.upsert_event(user_id, event_data)
-        except Exception as e:
-            logger.warning("Failed to save event: %s", e)
-    # 7. Show to user
-    if not top_events:
+    # 6. Show results (prefer crew results, fallback to pre-parsed)
+    if top_events:
+        await _show_events(message, top_events, city, db, user_id)
+    elif fallback_events:
+        await message.answer(
+            "AI found no additional events. Here are events from Luma/Meetup:"
+        )
+        await _show_events(message, fallback_events, city, db, user_id)
+    else:
         await message.answer(
             f"No events found in {city} for the next 2 weeks. "
             "Try changing your city with /location.",
             reply_markup=get_main_keyboard(),
         )
-        return
-    await message.answer(
-        f"Found {len(top_events)} events in {city}:"
-    )
-    for event in top_events:
-        card = format_event_card(event)
-        source_id = event.get("source_id", event.get("title", "unknown")[:20])
-        keyboard = get_event_keyboard(source_id)
-        try:
-            await message.answer(card, reply_markup=keyboard, parse_mode="HTML")
-        except Exception:
-            # Fallback without HTML if formatting fails
-            await message.answer(
-                f"{event.get('title', 'Event')}\n{event.get('source_url', '')}",
-                reply_markup=keyboard,
-            )
