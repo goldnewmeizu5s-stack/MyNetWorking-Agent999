@@ -1,6 +1,7 @@
 """Handler for /events command - triggers DiscoveryCrew."""
 import json
 import logging
+import traceback
 from datetime import date, timedelta
 from aiogram import Router
 from aiogram.filters import Command
@@ -8,6 +9,14 @@ from aiogram.types import Message
 from bot.formatters import format_event_card
 from bot.keyboards import get_event_keyboard, get_main_keyboard
 logger = logging.getLogger(__name__)
+MAX_TG_MSG = 4096
+
+
+def _escape(text: str) -> str:
+    """Escape HTML special chars for Telegram <pre> blocks."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 router = Router()
 @router.message(Command("events"))
 async def handle_events(
@@ -66,13 +75,26 @@ async def handle_events(
             user_id=user_id,
         )
     except Exception as e:
-        logger.error("CrewAI discovery failed: %s", e)
+        tb = traceback.format_exc()
+        logger.error("CrewAI discovery failed: %s\n%s", e, tb)
+        error_detail = f"⚠️ CrewAI error:\n<pre>{_escape(str(e))}\n\n{_escape(tb)}</pre>"
         await message.answer(
-            "Sorry, event search failed. Please try again later.",
-            reply_markup=get_main_keyboard(),
+            error_detail[:MAX_TG_MSG],
+            parse_mode="HTML",
         )
         return
-    # 5. Parse result
+    # 5. Check crew status and parse result
+    crew_status = result.get("status", "unknown")
+    if crew_status in ("failed", "error"):
+        raw_preview = str(result)[:2000]
+        logger.error("CrewAI returned status=%s: %s", crew_status, raw_preview)
+        error_detail = (
+            f"⚠️ CrewAI status: {crew_status}\n"
+            f"<pre>{_escape(raw_preview)}</pre>"
+        )
+        await message.answer(error_detail[:MAX_TG_MSG], parse_mode="HTML")
+        return
+
     try:
         result_data = result.get("result", {})
         output_str = result_data.get("output", result.get("output", "{}"))
@@ -83,10 +105,16 @@ async def handle_events(
         # Handle both possible response formats
         top_events = output.get("top_events", output.get("scored_events", []))
     except (json.JSONDecodeError, AttributeError, TypeError) as e:
-        logger.error("Failed to parse CrewAI result: %s | raw: %s", e, str(result)[:500])
+        tb = traceback.format_exc()
+        raw_preview = str(result)[:1500]
+        logger.error("Failed to parse CrewAI result: %s\n%s\nraw: %s", e, tb, raw_preview)
+        error_detail = (
+            f"⚠️ Parse error:\n<pre>{_escape(str(e))}</pre>"
+            f"\n\nRaw result:\n<pre>{_escape(raw_preview)}</pre>"
+        )
         await message.answer(
-            "Found events but couldn't parse results. Please try again.",
-            reply_markup=get_main_keyboard(),
+            error_detail[:MAX_TG_MSG],
+            parse_mode="HTML",
         )
         return
     # 6. Save to DB
