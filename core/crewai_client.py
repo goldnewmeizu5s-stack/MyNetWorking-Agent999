@@ -3,10 +3,14 @@
 import asyncio
 import json
 import logging
+from typing import Callable, Awaitable, Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Progress callback type: async def callback(elapsed_sec: int) -> None
+ProgressCallback = Callable[[int], Awaitable[None]]
 
 
 class CrewAIClient:
@@ -42,7 +46,11 @@ class CrewAIClient:
         logger.info("Kickoff started: %s", data.get("kickoff_id"))
         return data
 
-    async def poll_status(self, kickoff_id: str) -> dict:
+    async def poll_status(
+        self,
+        kickoff_id: str,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> dict:
         """Poll crew execution status until completed or failed."""
         for attempt in range(self.max_retries):
             response = await self.client.get(
@@ -54,30 +62,45 @@ class CrewAIClient:
             logger.info("Poll %d/%d: status=%s", attempt + 1, self.max_retries, status)
             if status in ("completed", "failed", "error"):
                 return data
+            elapsed = (attempt + 1) * self.poll_interval
+            if on_progress and elapsed % 60 == 0:
+                await on_progress(elapsed)
             await asyncio.sleep(self.poll_interval)
         raise TimeoutError(
             f"Crew execution {kickoff_id} timed out after "
             f"{self.max_retries * self.poll_interval}s"
         )
 
-    async def run_crew(self, inputs: dict) -> dict:
+    async def run_crew(
+        self,
+        inputs: dict,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> dict:
         """Kickoff and wait for result."""
         kickoff = await self.kickoff(inputs)
         kickoff_id = kickoff["kickoff_id"]
-        return await self.poll_status(kickoff_id)
+        return await self.poll_status(kickoff_id, on_progress=on_progress)
 
-    async def run_discovery(self, raw_events: list, context: dict) -> dict:
+    async def run_discovery(
+        self,
+        raw_events: list,
+        context: dict,
+        on_progress: Optional[ProgressCallback] = None,
+    ) -> dict:
         """Run discovery flow (Scout searches + Analyst scores)."""
         user_profile = context.get("user_profile", {})
-        return await self.run_crew({
-            "raw_events": json.dumps(raw_events, ensure_ascii=False),
-            "context": json.dumps(context, ensure_ascii=False, default=str),
-            "debrief_data": "[]",
-            "period": "",
-            "event": "any",
-            "existing_data": "[]",
-            "user_profile": json.dumps(user_profile, ensure_ascii=False),
-        })
+        return await self.run_crew(
+            {
+                "raw_events": json.dumps(raw_events, ensure_ascii=False),
+                "context": json.dumps(context, ensure_ascii=False, default=str),
+                "debrief_data": "[]",
+                "period": "",
+                "event": "any",
+                "existing_data": "[]",
+                "user_profile": json.dumps(user_profile, ensure_ascii=False),
+            },
+            on_progress=on_progress,
+        )
 
     async def close(self):
         await self.client.aclose()
