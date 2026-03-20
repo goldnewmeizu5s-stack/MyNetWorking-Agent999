@@ -91,8 +91,9 @@ async def main():
 
     # Register optional routers
     try:
-        from bot.handlers import booking, challenge, contacts, debrief, settings, stats, voice
+        from bot.handlers import booking, challenge, contacts, debug, debrief, settings, stats, voice
         dp.include_router(booking.router)
+        dp.include_router(debug.router)
         dp.include_router(debrief.router)
         dp.include_router(settings.router)
         dp.include_router(stats.router)
