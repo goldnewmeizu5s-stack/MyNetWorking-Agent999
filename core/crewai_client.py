@@ -136,7 +136,7 @@ For each event provide these exact fields:
 - location_name: venue name as string or null
 - location_city: city name as string (always fill this)
 - ticket_price: price as number like 25.0, or null if free
-- source_url: full URL from search results or null
+- source_url: IMPORTANT - search carefully in the search results text for any URL (lu.ma/*, eventbrite.com/*, meetup.com/*, ethglobal.com/*, etc.) related to this event. If found, include the full URL. Only use null if absolutely no URL exists in the search results.
 - organizer_name: organizer as string or null
 - event_type: one of "conference", "meetup", "workshop", "networking_dinner", "other"
 - description: 1-2 sentence description
