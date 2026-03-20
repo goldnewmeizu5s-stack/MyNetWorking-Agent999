@@ -92,7 +92,7 @@ async def _transcribe(file_data: io.BytesIO) -> str | None:
                 "https://api.openai.com/v1/audio/transcriptions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 files={"file": ("voice.ogg", file_data, "audio/ogg")},
-                data={"model": "whisper-1", "language": "en"},
+                data={"model": "whisper-1"},
             )
             if resp.status_code == 200:
                 return resp.json().get("text")
