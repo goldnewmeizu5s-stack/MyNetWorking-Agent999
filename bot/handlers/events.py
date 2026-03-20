@@ -79,7 +79,7 @@ async def handle_events(
 
     # 4. Run DiscoveryCrew on CrewAI Platform
     await message.answer(
-        f"🤖 AI is searching for events in {city}... This may take 1-3 minutes."
+        f"🤖 AI is searching for events in {city}... (~20-30 seconds)"
     )
 
     try:
