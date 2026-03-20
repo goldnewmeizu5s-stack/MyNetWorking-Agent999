@@ -18,6 +18,20 @@ class ContextBuilder:
 
     async def build(self, user_id: int) -> dict:
         profile = await self.db.get_user_profile(user_id)
+        if profile is None:
+            return {
+                "user_profile": {},
+                "current_location": {"city": "", "lat": 0.0, "lon": 0.0},
+                "planned_moves": [],
+                "recent_events": [],
+                "active_challenges": [],
+                "used_methodology_ids": [],
+                "learned_preferences": [],
+                "conversation_summary": "",
+                "budget_status": {},
+                "user_level": "beginner",
+                "challenge_count": 0,
+            }
         recent_events = await self.db.get_recent_events(user_id, limit=5)
         active_challenges = await self.db.get_active_challenges(user_id)
         preferences = await self.db.get_learned_preferences(user_id)

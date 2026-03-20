@@ -100,5 +100,25 @@ class CrewAIClient:
             },
         )
 
+    async def run_weekly_report(
+        self,
+        context: dict,
+        period: str,
+    ) -> dict:
+        """Run weekly report crew."""
+        return await self.run_crew(
+            {
+                "raw_events": "[]",
+                "context": json.dumps(context, ensure_ascii=False, default=str),
+                "debrief_data": "[]",
+                "period": period,
+                "event": "any",
+                "existing_data": "[]",
+                "user_profile": json.dumps(
+                    context.get("user_profile", {}), ensure_ascii=False, default=str
+                ),
+            },
+        )
+
     async def close(self):
         await self.client.aclose()
