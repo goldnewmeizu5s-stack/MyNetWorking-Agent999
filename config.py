@@ -67,11 +67,11 @@ class Config:
     # CrewAI polling
     crewai_poll_interval: int = field(
         default_factory=lambda: int(
-            os.environ.get("CREWAI_POLL_INTERVAL", "5")
+            os.environ.get("CREWAI_POLL_INTERVAL", "10")
         )
     )
     crewai_max_retries: int = field(
         default_factory=lambda: int(
-            os.environ.get("CREWAI_MAX_RETRIES", "90")
+            os.environ.get("CREWAI_MAX_RETRIES", "180")
         )
     )
