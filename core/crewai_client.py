@@ -85,21 +85,19 @@ class CrewAIClient:
         self,
         raw_events: list,
         context: dict,
-        on_progress: Optional[ProgressCallback] = None,
     ) -> dict:
         """Run discovery flow (Scout searches + Analyst scores)."""
         user_profile = context.get("user_profile", {})
         return await self.run_crew(
             {
-                "raw_events": json.dumps(raw_events, ensure_ascii=False),
+                "raw_events": json.dumps(raw_events, ensure_ascii=False, default=str),
                 "context": json.dumps(context, ensure_ascii=False, default=str),
                 "debrief_data": "[]",
                 "period": "",
                 "event": "any",
                 "existing_data": "[]",
-                "user_profile": json.dumps(user_profile, ensure_ascii=False),
+                "user_profile": json.dumps(user_profile, ensure_ascii=False, default=str),
             },
-            on_progress=on_progress,
         )
 
     async def close(self):
