@@ -11,7 +11,9 @@ from aiogram.types import (
 def get_main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🔍 Events"), KeyboardButton(text="⚙️ Settings")],
+            [KeyboardButton(text="🔍 Events"), KeyboardButton(text="📍 Location")],
+            [KeyboardButton(text="⚙️ Settings"), KeyboardButton(text="📊 Stats")],
+            [KeyboardButton(text="🎯 Challenge"), KeyboardButton(text="📇 Contacts")],
         ],
         resize_keyboard=True,
         is_persistent=True,
