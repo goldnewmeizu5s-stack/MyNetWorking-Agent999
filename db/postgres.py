@@ -162,23 +162,36 @@ class Database:
             else:
                 # Parse datetime if string
                 dt_start = event_data.get("datetime_start")
-                if isinstance(dt_start, str):
+                if dt_start is None or str(dt_start) in ("None", ""):
+                    dt_start = datetime.now()
+                elif isinstance(dt_start, str):
                     try:
+                        # Handle date-only strings like "2026-04-16"
                         dt_start = datetime.fromisoformat(dt_start)
                     except ValueError:
-                        dt_start = datetime.now()
+                        try:
+                            from datetime import date
+                            dt_start = datetime.combine(
+                                date.fromisoformat(dt_start[:10]),
+                                __import__('datetime').time(0, 0)
+                            )
+                        except Exception:
+                            dt_start = datetime.now()
+                # If already a datetime object - use as is
 
                 import re
-                sid = event_data.get("source_id", "")
+                sid = event_data.get("source_id") or ""
                 if not sid:
                     raw = event_data.get("title", "unknown")
                     sid = re.sub(r"[^a-z0-9-]", "", raw.lower().replace(" ", "-"))[:40]
+
+                source_url = event_data.get("source_url") or ""
 
                 event = Event(
                     user_id=user_id,
                     source=event_data.get("source", "other"),
                     source_id=sid,
-                    source_url=event_data.get("source_url", ""),
+                    source_url=source_url,
                     title=event_data.get("title", ""),
                     description=event_data.get("description"),
                     datetime_start=dt_start,
