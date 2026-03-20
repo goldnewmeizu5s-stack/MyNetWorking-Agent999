@@ -192,19 +192,20 @@ async def _show_events(message: Message, events: list, city: str, db, user_id: i
 
     await message.answer(f"Found {len(events)} events in {city}:")
     for event in events:
+        # Generate source_id FIRST before saving
+        import re
+        source_id = event.get("source_id") or ""
+        if not source_id:
+            source_id = re.sub(
+                r"[^a-z0-9-]", "",
+                event.get("title", "unknown").lower().replace(" ", "-")
+            )[:40]
+        event["source_id"] = source_id
         try:
             await db.upsert_event(user_id, event)
         except Exception as e:
-            logger.warning("Failed to save event: %s", e)
-
+            logger.warning("Failed to save event %s: %s", source_id, e)
         card = format_event_card(event)
-        source_id = event.get("source_id") or ""
-        if not source_id:
-            import re
-            source_id = re.sub(r"[^a-z0-9-]", "",
-                event.get("title", "unknown").lower().replace(" ", "-"))[:40]
-        # Ensure source_id is saved back to event for DB lookup
-        event["source_id"] = source_id
         keyboard = get_event_keyboard(source_id)
         try:
             await message.answer(card, reply_markup=keyboard, parse_mode="HTML")
