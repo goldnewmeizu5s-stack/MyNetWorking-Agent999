@@ -5,6 +5,9 @@ import logging
 import os
 from typing import Callable, Awaitable, Optional
 
+import asyncio
+import re
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -37,7 +40,7 @@ class CrewAIClient:
         interests_str = ", ".join(interests[:3])
 
         logger.info("Starting parallel Perplexity searches for %s in %s", interests_str, city)
-        import asyncio
+
 
         # Run both searches in PARALLEL
         general_query = f"upcoming networking events {interests_str} in {city} 2026"
@@ -251,7 +254,7 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
         self, events: list[dict], city: str
     ) -> list[dict]:
         """For events without URLs, search individually."""
-        import asyncio
+
 
         async def find_url(event: dict) -> dict:
             if event.get("source_url"):
@@ -263,7 +266,7 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
                 domain_filter=["lu.ma", "meetup.com", "eventbrite.com"]
             )
             # Extract first URL from result
-            import re
+
             urls = re.findall(
                 r'https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com)/[\w\-/]+',
                 result
@@ -300,6 +303,9 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
 
     async def run_crew(self, inputs: dict, on_progress=None) -> dict:
         """Legacy method - used by debrief and other crews via Platform."""
+        if not self.base_url or not self.bearer_token:
+            logger.warning("CrewAI Platform not configured, skipping")
+            return {"output": "{}", "status": "skipped"}
         async with httpx.AsyncClient(timeout=1800) as client:
             resp = await client.post(
                 f"{self.base_url}/kickoff",
@@ -313,7 +319,7 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
             kickoff_id = resp.json()["kickoff_id"]
 
             for attempt in range(self.max_retries):
-                import asyncio
+        
 
                 await asyncio.sleep(self.poll_interval)
                 status_resp = await client.get(

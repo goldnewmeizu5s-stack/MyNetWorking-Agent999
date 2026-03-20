@@ -294,14 +294,15 @@ class Database:
         self, user_id: int
     ) -> int:
         async with self.session_factory() as session:
+            from sqlalchemy import func as sqlfunc
             result = await session.execute(
-                select(Challenge)
+                select(sqlfunc.count(Challenge.challenge_id))
                 .where(
                     Challenge.user_id == user_id,
                     Challenge.status == "completed",
                 )
             )
-            return len(list(result.scalars().all()))
+            return result.scalar() or 0
 
     async def get_used_methodology_ids(
         self, user_id: int
