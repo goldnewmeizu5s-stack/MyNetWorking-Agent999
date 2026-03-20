@@ -70,6 +70,13 @@ class CrewAIClient:
             city=city,
         )
 
+        # Enrich events without URLs
+        top_events = scored.get("top_events", [])
+        if top_events:
+            top_events = await self._enrich_events_with_urls(top_events, city)
+            scored["top_events"] = top_events
+            scored["scored_events"] = top_events
+
         return {"output": json.dumps(scored), "status": "completed"}
 
     async def run_debrief(self, debrief_data: dict, context: dict) -> dict:
@@ -239,6 +246,51 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
         except Exception as e:
             logger.error("Claude scoring failed: %s", e, exc_info=True)
             return {"top_events": [], "scored_events": []}
+
+    async def _enrich_events_with_urls(
+        self, events: list[dict], city: str
+    ) -> list[dict]:
+        """For events without URLs, search individually."""
+        import asyncio
+
+        async def find_url(event: dict) -> dict:
+            if event.get("source_url"):
+                return event  # Already has URL
+            title = event.get("title", "")
+            query = f'"{title}" {city} registration site:lu.ma OR site:meetup.com OR site:eventbrite.com'
+            result = await self._perplexity_search(query)
+            # Extract first URL from result
+            import re
+            urls = re.findall(
+                r'https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com)/[\w\-/]+',
+                result
+            )
+            if urls:
+                event["source_url"] = urls[0]
+                logger.info("Found URL for '%s': %s", title, urls[0])
+                # Update source based on URL
+                if "lu.ma" in urls[0]:
+                    event["source"] = "luma"
+                elif "meetup.com" in urls[0]:
+                    event["source"] = "meetup"
+                elif "eventbrite.com" in urls[0]:
+                    event["source"] = "eventbrite"
+            return event
+
+        # Run all URL searches in parallel
+        events_without_url = [e for e in events if not e.get("source_url")]
+        logger.info("Enriching %d events without URLs", len(events_without_url))
+        if not events_without_url:
+            return events
+
+        enriched = await asyncio.gather(*[find_url(e) for e in events_without_url])
+
+        # Merge back
+        url_map = {e.get("title"): e for e in enriched}
+        for event in events:
+            if event.get("title") in url_map:
+                event.update(url_map[event["title"]])
+        return events
 
     async def run_crew(self, inputs: dict, on_progress=None) -> dict:
         """Legacy method - used by debrief and other crews via Platform."""
