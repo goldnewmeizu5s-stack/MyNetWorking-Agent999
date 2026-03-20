@@ -489,10 +489,16 @@ class Database:
             )
             spent = result.scalar() or 0
             profile = await self.get_user_profile(user_id)
+            if profile is None:
+                return {
+                    "spent_this_month": float(spent),
+                    "estimated_monthly_budget": 0,
+                    "remaining": 0,
+                }
             budget = (
                 (profile.budget_limit_ticket or 50)
                 + (profile.budget_limit_transport or 20)
-            ) * 4  # Monthly estimate
+            ) * 4
 
             return {
                 "spent_this_month": float(spent),
