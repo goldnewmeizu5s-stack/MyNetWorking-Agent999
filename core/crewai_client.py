@@ -120,20 +120,53 @@ No markdown, no explanation."""
                     },
                     json={
                         "model": "claude-haiku-4-5-20251001",
-                        "max_tokens": 2000,
+                        "max_tokens": 4000,
                         "messages": [{"role": "user", "content": prompt}],
                     },
                 )
                 data = resp.json()
                 text = data["content"][0]["text"].strip()
-                # Strip markdown if present
-                if text.startswith("```"):
-                    text = text.split("```")[1]
-                    if text.startswith("json"):
-                        text = text[4:]
-                return json.loads(text)
+                logger.info("Claude raw response length: %d", len(text))
+
+                # Strip markdown fences
+                if "```" in text:
+                    parts = text.split("```")
+                    for part in parts:
+                        part = part.strip()
+                        if part.startswith("json"):
+                            part = part[4:].strip()
+                        if part.startswith("{"):
+                            text = part
+                            break
+
+                # Find first complete JSON object
+                start = text.find("{")
+                if start == -1:
+                    logger.error("No JSON object found in Claude response")
+                    return {"top_events": [], "scored_events": []}
+
+                # Find matching closing brace
+                depth = 0
+                end = -1
+                for i, ch in enumerate(text[start:], start):
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+
+                if end == -1:
+                    logger.error("Unterminated JSON, truncating. Length: %d", len(text))
+                    return {"top_events": [], "scored_events": []}
+
+                result = json.loads(text[start:end])
+                logger.info("Parsed %d top_events", len(result.get("top_events", [])))
+                return result
+
         except Exception as e:
-            logger.error("Claude scoring failed: %s", e)
+            logger.error("Claude scoring failed: %s", e, exc_info=True)
             return {"top_events": [], "scored_events": []}
 
     async def run_crew(self, inputs: dict, on_progress=None) -> dict:
