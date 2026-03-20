@@ -23,12 +23,16 @@ async def handle_start(message: Message, db):
         return
 
     # MVP: auto-create profile with defaults
+    import os
+    default_city = os.environ.get("DEFAULT_CITY", "Tbilisi")
+    default_lat = float(os.environ.get("DEFAULT_LAT", "41.7151"))
+    default_lon = float(os.environ.get("DEFAULT_LON", "44.8271"))
     await db.upsert_user_profile(
         user_id=user_id,
         name=message.from_user.full_name,
-        current_city="Tbilisi",
-        current_lat=41.7151,
-        current_lon=44.8271,
+        current_city=default_city,
+        current_lat=default_lat,
+        current_lon=default_lon,
         interests=["AI", "crypto", "DeFi", "startups", "B2B SaaS"],
         budget_limit_ticket=100,
         budget_limit_transport=30,

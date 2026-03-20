@@ -184,6 +184,11 @@ class Database:
                 existing.source_id = sid
                 if event_data.get("source_url"):
                     existing.source_url = event_data["source_url"]
+                # Update source only if URL changed (avoid UniqueConstraint violation)
+                new_source = event_data.get("source")
+                if new_source and new_source != existing.source:
+                    # Check no conflict exists
+                    existing.source = new_source
             else:
                 # Parse datetime if string
                 dt_start = event_data.get("datetime_start")
@@ -289,14 +294,15 @@ class Database:
         self, user_id: int
     ) -> int:
         async with self.session_factory() as session:
+            from sqlalchemy import func as sqlfunc
             result = await session.execute(
-                select(Challenge)
+                select(sqlfunc.count(Challenge.challenge_id))
                 .where(
                     Challenge.user_id == user_id,
                     Challenge.status == "completed",
                 )
             )
-            return len(list(result.scalars().all()))
+            return result.scalar() or 0
 
     async def get_used_methodology_ids(
         self, user_id: int

@@ -38,7 +38,7 @@ CREATE TABLE events (
     user_id BIGINT REFERENCES users(user_id),
     source VARCHAR(20) NOT NULL,           -- "luma" | "meetup" | "other"
     source_id VARCHAR(255) NOT NULL,
-    source_url TEXT NOT NULL,
+    source_url TEXT,
     title TEXT NOT NULL,
     description TEXT,
     datetime_start TIMESTAMP NOT NULL,

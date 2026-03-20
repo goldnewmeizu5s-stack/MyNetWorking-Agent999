@@ -418,7 +418,13 @@ async def _run_browser_booking(
     source: str, url: str, form_data: dict
 ) -> dict:
     """Run Playwright in subprocess."""
-    task = "luma_book" if source == "luma" else "meetup_book"
+    if source == "luma":
+        task = "luma_book"
+    elif source == "meetup":
+        task = "meetup_book"
+    else:
+        # eventbrite, perplexity, other — try luma_book as it's more generic
+        task = "luma_book"
     params = json.dumps({"url": url, "form_data": form_data})
 
     try:
