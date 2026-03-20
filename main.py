@@ -6,6 +6,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
+from bot.error_handler import ErrorForwarder
 from bot.handlers import events, start
 from bot.middleware import DependencyMiddleware, LoggingMiddleware
 from config import Config
@@ -62,6 +63,7 @@ async def main():
 
     # Initialize bot
     bot = Bot(token=config.telegram_bot_token)
+    error_forwarder = ErrorForwarder(bot=bot, admin_id=config.admin_telegram_id)
     dp = Dispatcher(storage=storage)
 
     # Register middleware
@@ -76,6 +78,7 @@ async def main():
         "crew_tracker": crew_tracker,
         "cache_manager": cache_manager,
         "bot": bot,
+        "error_forwarder": error_forwarder,
     }
 
     dp.message.middleware(LoggingMiddleware())
@@ -107,6 +110,14 @@ async def main():
         logger.warning("Menu handler not loaded: %s", e)
 
     logger.info("Bot starting...")
+
+    @dp.errors()
+    async def global_error_handler(event, exception):
+        await error_forwarder.send_error(
+            context=f"global ({type(event).__name__})",
+            error=exception,
+        )
+        return True
 
     try:
         await dp.start_polling(bot)
