@@ -3,50 +3,18 @@ import json
 import logging
 import traceback
 from datetime import date, timedelta
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
+
 from bot.formatters import format_event_card
 from bot.keyboards import get_event_keyboard, get_main_keyboard
+
 logger = logging.getLogger(__name__)
-MAX_TG_MSG = 4096
-
-
-def _escape(text: str) -> str:
-    """Escape HTML special chars for Telegram <pre> blocks."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-async def _show_events(message: Message, events: list, city: str, db, user_id: int):
-    """Display event cards to the user and save to DB."""
-    if not events:
-        await message.answer(
-            f"No events found in {city} for the next 2 weeks. "
-            "Try changing your city with /location.",
-            reply_markup=get_main_keyboard(),
-        )
-        return
-    await message.answer(f"Found {len(events)} events in {city}:")
-    for event in events:
-        # Save to DB
-        try:
-            await db.upsert_event(user_id, event)
-        except Exception as e:
-            logger.warning("Failed to save event: %s", e)
-        # Show card
-        card = format_event_card(event)
-        source_id = event.get("source_id", event.get("title", "unknown")[:20])
-        keyboard = get_event_keyboard(source_id)
-        try:
-            await message.answer(card, reply_markup=keyboard, parse_mode="HTML")
-        except Exception:
-            await message.answer(
-                f"{event.get('title', 'Event')}\n{event.get('source_url', '')}",
-                reply_markup=keyboard,
-            )
-
-
 router = Router()
+
+
 @router.message(Command("events"))
 async def handle_events(
     message: Message,
@@ -56,20 +24,30 @@ async def handle_events(
     scorer,
     db,
     crew_tracker,
+    error_forwarder,
     **kwargs,
 ):
     user_id = message.from_user.id
     await message.answer("🔍 Searching for events...")
-    # 1. Build context (Python, no LLM)
-    context = await context_builder.build(user_id)
+
+    # 1. Build context
+    try:
+        context = await context_builder.build(user_id)
+    except Exception as e:
+        await error_forwarder.send_error("events: build context", e)
+        await message.answer("Error loading profile. Try /start first.", reply_markup=get_main_keyboard())
+        return
+
     if not context.get("user_profile", {}).get("current_city"):
         await message.answer(
             "Please set your location first with /location",
             reply_markup=get_main_keyboard(),
         )
         return
+
     city = context["current_location"]["city"]
-    # 2. Try to parse events from Luma/Meetup (Python, no LLM)
+
+    # 2. Try to parse events from Luma/Meetup (best-effort, non-blocking)
     raw_events = []
     try:
         raw_events = await event_parser.parse_all(
@@ -82,8 +60,9 @@ async def handle_events(
         )
         logger.info("Parsed %d raw events from Luma/Meetup", len(raw_events))
     except Exception as e:
-        logger.warning("Event parsing failed: %s", e)
-    # 3. Calculate deterministic score for pre-parsed events
+        logger.warning("Event parsing failed (non-fatal): %s", e)
+
+    # 3. Deterministic score for pre-parsed events (fallback ranking)
     for event in raw_events:
         event["deterministic_score"] = scorer.calculate(
             event=event,
@@ -92,117 +71,138 @@ async def handle_events(
             transport_duration_min=0,
             calendar_free=True,
         )
-    # Sort pre-parsed events by deterministic score (fallback ranking)
     fallback_events = sorted(
         raw_events,
         key=lambda e: e.get("deterministic_score", 0),
         reverse=True,
     )[:5]
-    # 4. Run DiscoveryCrew on CrewAI Platform
-    # Scout will SEARCH for events via Perplexity + use any pre-parsed events
-    await message.answer(
-        f"🤖 AI is searching for events in {city}... This may take 2-5 minutes."
-    )
-    progress_messages = [
-        "⏳ Still searching... analyzing event details.",
-        "⏳ Scoring and ranking events for you...",
-        "⏳ Almost done, finalizing results...",
-    ]
-    progress_idx = 0
 
-    async def _on_progress(elapsed_sec: int):
-        nonlocal progress_idx
-        if progress_idx < len(progress_messages):
-            await message.answer(progress_messages[progress_idx])
-            progress_idx += 1
+    # 4. Run DiscoveryCrew on CrewAI Platform
+    await message.answer(
+        f"🤖 AI is searching for events in {city}... This may take 1-3 minutes."
+    )
 
     try:
         result = await crew_tracker.run_and_track(
             crew_name="discovery",
-            coro=crewai_client.run_discovery(
-                raw_events, context, on_progress=_on_progress
-            ),
+            coro=crewai_client.run_discovery(raw_events, context),
             user_id=user_id,
         )
     except TimeoutError as e:
-        logger.error("CrewAI discovery timed out: %s", e)
+        await error_forwarder.send_error("events: CrewAI timeout", e)
         if fallback_events:
-            await message.answer(
-                "⏳ AI scoring timed out, but here are events from Luma/Meetup "
-                "sorted by basic matching:"
-            )
+            await message.answer("⏳ AI search timed out. Showing direct parsing:")
             await _show_events(message, fallback_events, city, db, user_id)
         else:
-            await message.answer(
-                "⏳ The AI search took too long and timed out.\n\n"
-                "Please try again with /events.",
-            )
+            await message.answer("⏳ AI search timed out. Try again later.", reply_markup=get_main_keyboard())
         return
     except Exception as e:
-        tb = traceback.format_exc()
-        logger.error("CrewAI discovery failed: %s\n%s", e, tb)
+        await error_forwarder.send_error("events: CrewAI call", e)
         if fallback_events:
-            await message.answer(
-                "⚠️ AI scoring failed, but here are events from Luma/Meetup "
-                "sorted by basic matching:"
-            )
+            await message.answer("⚠️ AI search failed. Showing direct parsing:")
             await _show_events(message, fallback_events, city, db, user_id)
         else:
-            await message.answer(
-                "⚠️ Something went wrong while searching for events. "
-                "Please try again later.",
-            )
-        return
-    # 5. Check crew status and parse result
-    crew_status = result.get("status", "unknown")
-    if crew_status in ("failed", "error"):
-        raw_preview = str(result)[:2000]
-        logger.error("CrewAI returned status=%s: %s", crew_status, raw_preview)
-        if fallback_events:
-            await message.answer(
-                "⚠️ AI scoring returned an error, showing events from Luma/Meetup:"
-            )
-            await _show_events(message, fallback_events, city, db, user_id)
-        else:
-            await message.answer(
-                "⚠️ Event search failed. Please try again later.",
-            )
+            await message.answer("⚠️ Event search failed. Try again.", reply_markup=get_main_keyboard())
         return
 
-    try:
-        result_data = result.get("result", {})
-        output_str = result_data.get("output", result.get("output", "{}"))
-        if isinstance(output_str, str):
-            output = json.loads(output_str)
-        else:
-            output = output_str
-        # Handle both possible response formats
-        top_events = output.get("top_events", output.get("scored_events", []))
-    except (json.JSONDecodeError, AttributeError, TypeError) as e:
-        tb = traceback.format_exc()
-        raw_preview = str(result)[:1500]
-        logger.error("Failed to parse CrewAI result: %s\n%s\nraw: %s", e, tb, raw_preview)
+    # 5. Send raw result to admin for debugging
+    await error_forwarder.send_debug(
+        "CrewAI raw result",
+        json.dumps(result, default=str, ensure_ascii=False)[:3500],
+    )
+
+    # 6. Parse result — handle multiple possible formats
+    top_events = _parse_crew_result(result)
+
+    if top_events is None:
+        await error_forwarder.send_error(
+            "events: parse result",
+            ValueError("Could not parse CrewAI result"),
+            extra=json.dumps(result, default=str)[:2000],
+        )
         if fallback_events:
-            await message.answer(
-                "⚠️ Could not parse AI results, showing events from Luma/Meetup:"
-            )
+            await message.answer("⚠️ Could not parse AI results. Showing direct parsing:")
             await _show_events(message, fallback_events, city, db, user_id)
         else:
-            await message.answer(
-                "⚠️ Could not parse event results. Please try again.",
-            )
+            await message.answer("⚠️ Could not parse results. Try again.", reply_markup=get_main_keyboard())
         return
-    # 6. Show results (prefer crew results, fallback to pre-parsed)
+
+    # 7. Show results
     if top_events:
         await _show_events(message, top_events, city, db, user_id)
     elif fallback_events:
-        await message.answer(
-            "AI found no additional events. Here are events from Luma/Meetup:"
-        )
+        await message.answer("AI found no events. Showing direct parsing:")
         await _show_events(message, fallback_events, city, db, user_id)
     else:
         await message.answer(
-            f"No events found in {city} for the next 2 weeks. "
-            "Try changing your city with /location.",
+            f"No events found in {city}. Try /location to change city.",
             reply_markup=get_main_keyboard(),
         )
+
+
+def _parse_crew_result(result: dict) -> list | None:
+    """Parse CrewAI result handling multiple possible formats."""
+    try:
+        result_data = result.get("result", result)
+
+        if isinstance(result_data, str):
+            try:
+                result_data = json.loads(result_data)
+            except json.JSONDecodeError:
+                return None
+
+        output = result_data.get("output", result.get("output"))
+
+        if output is None:
+            if isinstance(result_data, list):
+                return result_data
+            for key in ("top_events", "scored_events", "events"):
+                if key in result_data:
+                    return result_data[key]
+            return None
+
+        if isinstance(output, str):
+            output = output.strip()
+            if output.startswith("{") or output.startswith("["):
+                output = json.loads(output)
+            else:
+                return None
+
+        if isinstance(output, list):
+            return output
+
+        if isinstance(output, dict):
+            for key in ("top_events", "scored_events", "events"):
+                if key in output:
+                    return output[key]
+            if "title" in output:
+                return [output]
+
+        return None
+    except (json.JSONDecodeError, AttributeError, TypeError, KeyError) as e:
+        logger.error("_parse_crew_result failed: %s", e)
+        return None
+
+
+async def _show_events(message: Message, events: list, city: str, db, user_id: int):
+    """Display event cards and save to DB."""
+    if not events:
+        await message.answer(f"No events found in {city}.", reply_markup=get_main_keyboard())
+        return
+
+    await message.answer(f"Found {len(events)} events in {city}:")
+    for event in events:
+        try:
+            await db.upsert_event(user_id, event)
+        except Exception as e:
+            logger.warning("Failed to save event: %s", e)
+
+        card = format_event_card(event)
+        source_id = event.get("source_id", event.get("title", "unknown")[:20])
+        keyboard = get_event_keyboard(source_id)
+        try:
+            await message.answer(card, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            title = event.get("title", "Event")
+            url = event.get("source_url", "")
+            await message.answer(f"{title}\n{url}", reply_markup=keyboard)

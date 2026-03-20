@@ -34,6 +34,11 @@ class Config:
         )
     )
 
+    # Admin
+    admin_telegram_id: int = field(
+        default_factory=lambda: int(os.environ.get("ADMIN_TELEGRAM_ID", "1010004170"))
+    )
+
     # Defaults
     default_city: str = field(
         default_factory=lambda: os.environ.get("DEFAULT_CITY", "Tbilisi")
