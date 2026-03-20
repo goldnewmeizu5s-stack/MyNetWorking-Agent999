@@ -53,6 +53,44 @@ class CrewAIClient:
 
         return {"output": json.dumps(scored), "status": "completed"}
 
+    async def run_debrief(self, debrief_data: dict, context: dict) -> dict:
+        """Calculate ROI and evaluate challenge directly via Claude."""
+        event = debrief_data.get("event", {})
+        contacts_count = debrief_data.get("contacts_count", 0)
+        contacts_quality = debrief_data.get("contacts_quality_avg", 7.0)
+        user_rating = debrief_data.get("user_rating", 5)
+        actual_cost = debrief_data.get("actual_cost", 0)
+        forecast_cost = event.get("total_estimated_cost", 0)
+
+        # Calculate ROI deterministically
+        divisor = actual_cost if actual_cost > 0 else 0.5
+        roi_score = round(
+            (contacts_count * contacts_quality * user_rating) / divisor, 2
+        )
+
+        # Format cost comparison
+        if forecast_cost and forecast_cost > 0:
+            diff_pct = round((actual_cost - forecast_cost) / forecast_cost * 100)
+            if diff_pct > 0:
+                comparison = f"Forecast: EUR{forecast_cost:.2f}, actual: EUR{actual_cost:.2f} (+{diff_pct}%)"
+            else:
+                comparison = f"Forecast: EUR{forecast_cost:.2f}, actual: EUR{actual_cost:.2f} ({diff_pct}%)"
+        else:
+            comparison = f"Actual cost: EUR{actual_cost:.2f}"
+
+        return {
+            "output": json.dumps({
+                "roi_score": roi_score,
+                "comparison_to_forecast": comparison,
+                "contacts_count": contacts_count,
+                "event_id": debrief_data.get("event_id", ""),
+                "actual_cost": actual_cost,
+                "contacts_quality_avg": contacts_quality,
+                "user_rating": user_rating,
+            }),
+            "status": "completed"
+        }
+
     async def _perplexity_search(self, query: str) -> str:
         """Call Perplexity Sonar API directly."""
         try:

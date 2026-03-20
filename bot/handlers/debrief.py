@@ -1,6 +1,7 @@
 """Handler for /debrief command - triggers DebriefCrew."""
 
 import json
+import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -8,8 +9,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
-from bot.keyboards import get_rating_keyboard
+from bot.keyboards import get_main_keyboard, get_rating_keyboard
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -95,18 +97,12 @@ async def handle_contacts(
     context = await context_builder.build(user_id)
 
     try:
-        result = await crewai_client.run_crew({
-            "debrief_data": json.dumps(debrief_data, ensure_ascii=False, default=str),
-            "context": json.dumps(context, ensure_ascii=False, default=str),
-            "raw_events": "[]",
-            "period": "",
-            "event": "any",
-            "existing_data": "[]",
-            "user_profile": "{}",
-        })
+        result = await crewai_client.run_debrief(
+            debrief_data=debrief_data,
+            context=context,
+        )
         output = json.loads(result["output"])
 
-        # Save result to DB
         await db.create_event_result(
             event_id=event_id,
             user_id=user_id,
@@ -116,33 +112,25 @@ async def handle_contacts(
             roi_score=output.get("roi_score", 0),
         )
 
-        # Learn from debrief
         await preference_learner.learn_from_debrief(
             user_id, event.to_dict(), rating
         )
 
-        # Format response
         roi = output.get("roi_score", 0)
         comparison = output.get("comparison_to_forecast", "")
         text = (
-            f"ROI: {roi:.1f}\n"
+            f"<b>📊 Debrief Complete!</b>\n\n"
+            f"ROI Score: <b>{roi:.1f}</b>\n"
             f"{comparison}\n"
-            f"Contacts: {len(contacts)}\n"
+            f"Contacts made: {len(contacts)}\n"
+            f"Your rating: {rating}/10"
         )
-
-        challenge_eval = output.get("challenge_evaluation")
-        if challenge_eval:
-            text += f"\nChallenge: {challenge_eval.get('status', 'N/A')}"
-            feedback = challenge_eval.get("feedback", "")
-            if feedback:
-                text += f"\n{feedback}"
-
-        await message.answer(text)
-
-    except Exception:
+        await message.answer(text, parse_mode="HTML", reply_markup=get_main_keyboard())
+    except Exception as e:
+        logger.error("Debrief failed: %s", e)
         await message.answer(
-            "Something went wrong with the debrief analysis. "
-            "Your data has been saved though."
+            "Could not calculate ROI. Data saved.",
+            reply_markup=get_main_keyboard(),
         )
 
     await state.clear()
