@@ -105,10 +105,10 @@ async def handle_events(
             await message.answer("⚠️ Event search failed. Try again.", reply_markup=get_main_keyboard())
         return
 
-    # 5. Send raw result to admin for debugging
-    await error_forwarder.send_debug(
-        "CrewAI raw result",
-        json.dumps(result, default=str, ensure_ascii=False)[:3500],
+    # 5. Log raw result for debugging (not sent to user chat)
+    logger.debug(
+        "CrewAI raw result: %s",
+        json.dumps(result, default=str, ensure_ascii=False)[:500],
     )
 
     # 6. Parse result — handle multiple possible formats
@@ -198,7 +198,13 @@ async def _show_events(message: Message, events: list, city: str, db, user_id: i
             logger.warning("Failed to save event: %s", e)
 
         card = format_event_card(event)
-        source_id = event.get("source_id", event.get("title", "unknown")[:20])
+        source_id = event.get("source_id") or ""
+        if not source_id:
+            import re
+            source_id = re.sub(r"[^a-z0-9-]", "",
+                event.get("title", "unknown").lower().replace(" ", "-"))[:40]
+        # Ensure source_id is saved back to event for DB lookup
+        event["source_id"] = source_id
         keyboard = get_event_keyboard(source_id)
         try:
             await message.answer(card, reply_markup=keyboard, parse_mode="HTML")

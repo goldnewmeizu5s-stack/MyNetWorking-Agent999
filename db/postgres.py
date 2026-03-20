@@ -168,10 +168,16 @@ class Database:
                     except ValueError:
                         dt_start = datetime.now()
 
+                import re
+                sid = event_data.get("source_id", "")
+                if not sid:
+                    raw = event_data.get("title", "unknown")
+                    sid = re.sub(r"[^a-z0-9-]", "", raw.lower().replace(" ", "-"))[:40]
+
                 event = Event(
                     user_id=user_id,
                     source=event_data.get("source", "other"),
-                    source_id=event_data.get("source_id", ""),
+                    source_id=sid,
                     source_url=event_data.get("source_url", ""),
                     title=event_data.get("title", ""),
                     description=event_data.get("description"),

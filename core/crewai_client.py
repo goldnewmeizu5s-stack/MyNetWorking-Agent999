@@ -96,8 +96,14 @@ User interests: {interests}
 User budget: EUR{budget}
 
 Extract and score up to 5 networking events. For each event return:
-- title, datetime_start, location_name, location_city, ticket_price (null if free)
-- source_url, organizer_name, event_type, description
+- title: string
+    - datetime_start: "YYYY-MM-DD" format or null
+    - location_name: venue name or null
+    - location_city: city name
+    - ticket_price: number in EUR (e.g. 50.0) or null if genuinely free.
+      Check search results carefully for price info.
+    - source_url: URL from search results or null
+    - organizer_name, event_type, description
 - total_score (0-100 based on relevance to interests and budget fit)
 - recommendation: "strong_recommend" if >80, "suitable" if >60, "borderline" if >40, else "skip"
 - recommendation_reason (1 sentence)
