@@ -85,35 +85,38 @@ class CrewAIClient:
         interests = user_profile.get("interests", [])
         budget = user_profile.get("budget_limit_ticket", 100)
 
-        prompt = f"""You are an event scoring assistant.
-
-Search results about events in {city}:
+        prompt = f"""You are an event discovery and scoring assistant.
+Search results about networking events in {city}:
 {search_results[:3000]}
-
-Pre-parsed events: {json.dumps(raw_events[:3], ensure_ascii=False)[:1000]}
-
+Pre-parsed events (may be empty): {json.dumps(raw_events[:3], ensure_ascii=False)[:500]}
 User interests: {interests}
-User budget: EUR{budget}
-
-Extract and score up to 5 networking events. For each event return:
-- title: string
-    - datetime_start: "YYYY-MM-DD" format or null
-    - location_name: venue name or null
-    - location_city: city name
-    - ticket_price: number in EUR (e.g. 50.0) or null if genuinely free.
-      Check search results carefully for price info.
-    - source_url: URL from search results or null
-    - organizer_name, event_type, description
-- total_score (0-100 based on relevance to interests and budget fit)
-- recommendation: "strong_recommend" if >80, "suitable" if >60, "borderline" if >40, else "skip"
-- recommendation_reason (1 sentence)
-- source: "perplexity"
-- source_id: slugified title
-- currency: "EUR"
-- language: "en"
-
-Return ONLY valid JSON object: {{"top_events": [...], "scored_events": [...]}}
-No markdown, no explanation."""
+User budget limit: EUR{budget} per ticket
+Your task: extract and score up to 5 networking events from the search results.
+For each event provide these exact fields:
+- title: event name as string
+- datetime_start: date string "YYYY-MM-DD" or null if unknown
+- location_name: venue name as string or null
+- location_city: city name as string (always fill this)
+- ticket_price: price as number like 25.0, or null if free
+- source_url: full URL from search results or null
+- organizer_name: organizer as string or null
+- event_type: one of "conference", "meetup", "workshop", "networking_dinner", "other"
+- description: 1-2 sentence description
+- total_score: integer 0-100 based on relevance to user interests and budget fit
+- recommendation: exactly "strong_recommend" if score>80, "suitable" if score>60, "borderline" if score>40, "skip" otherwise
+- recommendation_reason: one sentence explaining the score
+- source: always "perplexity"
+- source_id: URL-friendly slug of the title (lowercase, hyphens, no spaces)
+- currency: always "EUR"
+- language: "en" or detected language code
+Scoring guide:
+- High score (80-100): directly matches user interests, within budget, well-known organizer
+- Medium score (60-79): partially matches interests or slightly over budget
+- Low score (40-59): tangentially related, significantly over budget
+- Skip (0-39): irrelevant to user interests
+Return ONLY a valid JSON object with this exact structure:
+{{"top_events": [list of up to 5 best events], "scored_events": [same list]}}
+No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
 
         try:
             async with httpx.AsyncClient(timeout=60) as client:
