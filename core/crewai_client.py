@@ -42,10 +42,19 @@ class CrewAIClient:
             f"upcoming networking events {interests_str} in {city} 2026"
         )
 
+        # Second search to get actual event URLs
+        url_results = await self._perplexity_search(
+            f"site:lu.ma OR site:meetup.com OR site:eventbrite.com "
+            f"networking {interests_str} {city} 2026 registration link"
+        )
+
+        # Combine both results
+        combined_results = search_results + "\n\nEVENT URLS:\n" + url_results
+
         # Step 2: Score and rank via Claude directly
         logger.info("Scoring events via Claude direct API")
         scored = await self._claude_score(
-            search_results=search_results,
+            search_results=combined_results,
             raw_events=raw_events,
             user_profile=user_profile,
             city=city,
@@ -125,7 +134,7 @@ class CrewAIClient:
 
         prompt = f"""You are an event discovery and scoring assistant.
 Search results about networking events in {city}:
-{search_results[:3000]}
+{search_results[:4000]}
 Pre-parsed events (may be empty): {json.dumps(raw_events[:3], ensure_ascii=False)[:500]}
 User interests: {interests}
 User budget limit: EUR{budget} per ticket
