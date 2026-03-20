@@ -1,5 +1,7 @@
 """Handlers for /location, /interests, /budget, /settings commands."""
 
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -8,6 +10,7 @@ from aiogram.types import Message
 
 from bot.keyboards import get_main_keyboard
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -60,11 +63,34 @@ async def process_location(message: Message, state: FSMContext, db, **kwargs):
     city = message.text.strip()
     user_id = message.from_user.id
 
-    # Geocoding would happen here in production
-    await db.update_user_city(user_id, city, lat=0.0, lon=0.0)
+    # Geocode city using OpenStreetMap Nominatim (free, no API key)
+    lat, lon = 0.0, 0.0
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": city, "format": "json", "limit": 1},
+                headers={"User-Agent": "PlanetNineBot/1.0"},
+            )
+            if resp.status_code == 200:
+                results = resp.json()
+                if results:
+                    lat = float(results[0]["lat"])
+                    lon = float(results[0]["lon"])
+                    # Use the official city name from geocoder
+                    city = results[0].get("display_name", city).split(",")[0].strip()
+    except Exception as e:
+        logger.warning("Geocoding failed for %s: %s", city, e)
+    await db.update_user_city(user_id, city, lat=lat, lon=lon)
     await state.clear()
+
+    location_info = f"📍 {city}"
+    if lat != 0.0:
+        location_info += f" ({lat:.2f}, {lon:.2f})"
+
     await message.answer(
-        f"Location updated to {city}!",
+        f"Location updated to {location_info}!",
         reply_markup=get_main_keyboard(),
     )
 
