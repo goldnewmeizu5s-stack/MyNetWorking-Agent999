@@ -105,10 +105,10 @@ async def handle_events(
             await message.answer("⚠️ Event search failed. Try again.", reply_markup=get_main_keyboard())
         return
 
-    # 5. Send raw result to admin for debugging
-    await error_forwarder.send_debug(
-        "CrewAI raw result",
-        json.dumps(result, default=str, ensure_ascii=False)[:3500],
+    # 5. Log raw result for debugging (not sent to user chat)
+    logger.debug(
+        "CrewAI raw result: %s",
+        json.dumps(result, default=str, ensure_ascii=False)[:500],
     )
 
     # 6. Parse result — handle multiple possible formats

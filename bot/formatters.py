@@ -46,21 +46,27 @@ def format_event_card(event: dict) -> str:
     if estimated_audience:
         audience_str = f"\n~{estimated_audience} participants"
 
-    card = (
-        f"<b>Score: {score:.0f}/100</b>\n"
-        f"<b>{title}</b>\n"
-        f"{datetime_start}\n"
-        f"{location}"
-    )
-    if location_city:
-        card += f", {location_city}"
-    card += (
-        f"\n{price_str}"
-        f"{transport_str}\n"
-        f"{language.upper() if language else ''}"
-        f"{audience_str}\n"
-        f"<i>{score_label}</i>"
-    )
+    card = f"<b>Score: {score:.0f}/100</b>\n<b>{title}</b>\n"
+
+    if datetime_start and datetime_start != "None":
+        card += f"{datetime_start}\n"
+
+    location_parts = []
+    if location and location != "None":
+        location_parts.append(location)
+    if location_city and location_city != "None":
+        location_parts.append(location_city)
+    if location_parts:
+        card += ", ".join(location_parts) + "\n"
+
+    card += f"{price_str}"
+    card += f"{transport_str}\n"
+
+    if language and language != "None":
+        card += f"{language.upper()}"
+
+    card += f"{audience_str}\n<i>{score_label}</i>"
+
     if recommendation_reason:
         card += f"\n{recommendation_reason}"
 
