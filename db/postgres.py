@@ -147,10 +147,16 @@ class Database:
 
     async def upsert_event(self, user_id: int, event_data: dict) -> None:
         async with self.session_factory() as session:
+            import re
+            sid = event_data.get("source_id") or ""
+            if not sid:
+                raw = event_data.get("title", "unknown")
+                sid = re.sub(r"[^a-z0-9-]", "", raw.lower().replace(" ", "-"))[:40]
+
             result = await session.execute(
                 select(Event).where(
                     Event.user_id == user_id,
-                    Event.source_id == event_data.get("source_id", ""),
+                    Event.source_id == sid,
                 )
             )
             existing = result.scalar_one_or_none()
@@ -159,6 +165,8 @@ class Database:
                 for key, value in event_data.items():
                     if hasattr(existing, key) and value is not None:
                         setattr(existing, key, value)
+                # Always update source_id to latest generated value
+                existing.source_id = sid
             else:
                 # Parse datetime if string
                 dt_start = event_data.get("datetime_start")
@@ -178,12 +186,6 @@ class Database:
                         except Exception:
                             dt_start = datetime.now()
                 # If already a datetime object - use as is
-
-                import re
-                sid = event_data.get("source_id") or ""
-                if not sid:
-                    raw = event_data.get("title", "unknown")
-                    sid = re.sub(r"[^a-z0-9-]", "", raw.lower().replace(" ", "-"))[:40]
 
                 source_url = event_data.get("source_url") or ""
 

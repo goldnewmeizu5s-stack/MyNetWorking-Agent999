@@ -19,6 +19,7 @@ from core.event_parser import EventParser
 from core.preference_learner import PreferenceLearner
 from db.postgres import Database
 from db.redis import RedisCache
+from scheduler import SchedulerManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +65,18 @@ async def main():
     # Initialize bot
     bot = Bot(token=config.telegram_bot_token)
     error_forwarder = ErrorForwarder(bot=bot, admin_id=config.admin_telegram_id)
+
+    # Initialize scheduler
+    scheduler = SchedulerManager(
+        db=db,
+        redis=redis,
+        crewai_client=crewai_client,
+        context_builder=context_builder,
+        event_parser=event_parser,
+        scorer=scorer,
+        bot=bot,
+    )
+
     dp = Dispatcher(storage=storage)
 
     # Register middleware
@@ -111,6 +124,8 @@ async def main():
         logger.warning("Menu handler not loaded: %s", e)
 
     logger.info("Bot starting...")
+    scheduler.start()
+    logger.info("Scheduler started")
 
     @dp.errors()
     async def global_error_handler(event, exception):
@@ -123,6 +138,7 @@ async def main():
     try:
         await dp.start_polling(bot)
     finally:
+        scheduler.stop()
         await crewai_client.close()
         if redis:
             await redis.close()

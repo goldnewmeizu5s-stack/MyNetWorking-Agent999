@@ -100,7 +100,14 @@ async def handle_booking(
     )
 
     # 1. Scan form fields via Playwright
-    fields = await _scan_form_fields(event.source_url)
+    source_url = event.source_url or ""
+    if source_url and source_url.startswith("http"):
+        fields = await _scan_form_fields(source_url)
+    else:
+        fields = []
+        logger.info(
+            "No valid URL for event %s, using default fields", event.source_id
+        )
     if not fields:
         # Fallback: assume standard Luma fields
         fields = [
@@ -232,9 +239,22 @@ async def handle_brief_confirm(
     await callback.message.answer("Registering you now...")
 
     # Run Playwright booking
+    event_url = data.get("event_url") or ""
+    if not event_url or not event_url.startswith("http"):
+        # No URL - send manual booking message
+        await callback.message.answer(
+            f"✅ Registration data saved!\n\n"
+            f"No direct booking URL available for this event.\n"
+            f"Please register manually — your details are saved for next time:\n"
+            f"Name: {form_data.get('name', '')}\n"
+            f"Email: {form_data.get('email', '')}",
+            reply_markup=get_main_keyboard(),
+        )
+        await state.clear()
+        return
     browser_result = await _run_browser_booking(
         source=data["event_source"],
-        url=data["event_url"],
+        url=event_url,
         form_data=form_data,
     )
 

@@ -141,46 +141,36 @@ async def handle_events(
 
 
 def _parse_crew_result(result: dict) -> list | None:
-    """Parse CrewAI result handling multiple possible formats."""
+    """Parse discovery result. Supports direct Claude format and legacy Platform format."""
     try:
-        result_data = result.get("result", result)
+        # Primary format from direct Claude call:
+        # {"output": "{\"top_events\": [...]}", "status": "completed"}
+        output = result.get("output")
 
-        if isinstance(result_data, str):
+        # Parse output if it's a JSON string
+        if isinstance(output, str) and output.strip():
             try:
-                result_data = json.loads(result_data)
-            except json.JSONDecodeError:
-                return None
-
-        output = result_data.get("output", result.get("output"))
-
-        if output is None:
-            if isinstance(result_data, list):
-                return result_data
-            for key in ("top_events", "scored_events", "events"):
-                if key in result_data:
-                    return result_data[key]
-            return None
-
-        if isinstance(output, str):
-            output = output.strip()
-            if output.startswith("{") or output.startswith("["):
                 output = json.loads(output)
-            else:
+            except json.JSONDecodeError:
+                logger.error("Failed to parse output JSON: %s", output[:200])
                 return None
 
-        if isinstance(output, list):
-            return output
-
+        # Extract events list from dict
         if isinstance(output, dict):
             for key in ("top_events", "scored_events", "events"):
-                if key in output:
-                    return output[key]
-            if "title" in output:
-                return [output]
+                events = output.get(key)
+                if isinstance(events, list) and events:
+                    logger.info("Found %d events under key '%s'", len(events), key)
+                    return events
 
+        # Output is already a list
+        if isinstance(output, list) and output:
+            return output
+
+        logger.warning("No events found in result: %s", str(result)[:200])
         return None
-    except (json.JSONDecodeError, AttributeError, TypeError, KeyError) as e:
-        logger.error("_parse_crew_result failed: %s", e)
+    except Exception as e:
+        logger.error("_parse_crew_result failed: %s", e, exc_info=True)
         return None
 
 
@@ -192,19 +182,20 @@ async def _show_events(message: Message, events: list, city: str, db, user_id: i
 
     await message.answer(f"Found {len(events)} events in {city}:")
     for event in events:
+        # Generate source_id FIRST before saving
+        import re
+        source_id = event.get("source_id") or ""
+        if not source_id:
+            source_id = re.sub(
+                r"[^a-z0-9-]", "",
+                event.get("title", "unknown").lower().replace(" ", "-")
+            )[:40]
+        event["source_id"] = source_id
         try:
             await db.upsert_event(user_id, event)
         except Exception as e:
-            logger.warning("Failed to save event: %s", e)
-
+            logger.warning("Failed to save event %s: %s", source_id, e)
         card = format_event_card(event)
-        source_id = event.get("source_id") or ""
-        if not source_id:
-            import re
-            source_id = re.sub(r"[^a-z0-9-]", "",
-                event.get("title", "unknown").lower().replace(" ", "-"))[:40]
-        # Ensure source_id is saved back to event for DB lookup
-        event["source_id"] = source_id
         keyboard = get_event_keyboard(source_id)
         try:
             await message.answer(card, reply_markup=keyboard, parse_mode="HTML")

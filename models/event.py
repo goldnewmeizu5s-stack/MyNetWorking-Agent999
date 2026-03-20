@@ -29,7 +29,7 @@ class Event(Base):
     user_id = Column(BigInteger, ForeignKey("users.user_id"))
     source = Column(String(20), nullable=False)
     source_id = Column(String(255), nullable=False)
-    source_url = Column(Text, nullable=False)
+    source_url = Column(Text, nullable=True, default="")
     title = Column(Text, nullable=False)
     description = Column(Text)
     datetime_start = Column(DateTime, nullable=False)
