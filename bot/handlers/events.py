@@ -198,7 +198,13 @@ async def _show_events(message: Message, events: list, city: str, db, user_id: i
             logger.warning("Failed to save event: %s", e)
 
         card = format_event_card(event)
-        source_id = event.get("source_id", event.get("title", "unknown")[:20])
+        source_id = event.get("source_id") or ""
+        if not source_id:
+            import re
+            source_id = re.sub(r"[^a-z0-9-]", "",
+                event.get("title", "unknown").lower().replace(" ", "-"))[:40]
+        # Ensure source_id is saved back to event for DB lookup
+        event["source_id"] = source_id
         keyboard = get_event_keyboard(source_id)
         try:
             await message.answer(card, reply_markup=keyboard, parse_mode="HTML")

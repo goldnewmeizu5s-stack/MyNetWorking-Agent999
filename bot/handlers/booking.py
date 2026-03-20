@@ -90,6 +90,7 @@ async def handle_booking(
     await callback.answer()
 
     event = await db.get_event(event_id)
+    logger.info("Looking up event_id: %s, found: %s", event_id, event is not None)
     if not event:
         await callback.message.answer("Event not found.")
         return
