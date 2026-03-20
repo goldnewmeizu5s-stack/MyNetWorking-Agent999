@@ -30,28 +30,38 @@ class CrewAIClient:
         self._anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
     async def run_discovery(self, raw_events: list, context: dict) -> dict:
-        """Run discovery: Perplexity search + Claude scoring. ~60 seconds."""
+        """Run discovery: Perplexity search + Claude scoring."""
         user_profile = context.get("user_profile", {})
         city = context.get("current_location", {}).get("city", "Tbilisi")
         interests = user_profile.get("interests", ["AI", "startups"])
         interests_str = ", ".join(interests[:3])
 
-        # Step 1: Search via Perplexity
-        logger.info("Starting Perplexity search for %s in %s", interests_str, city)
-        search_results = await self._perplexity_search(
-            f"upcoming networking events {interests_str} in {city} 2026"
+        logger.info("Starting parallel Perplexity searches for %s in %s", interests_str, city)
+        import asyncio
+
+        # Run both searches in PARALLEL
+        general_query = f"upcoming networking events {interests_str} in {city} 2026"
+        url_query = f"networking events {interests_str} {city} 2026"
+        search_results, url_results = await asyncio.gather(
+            self._perplexity_search(general_query),
+            self._perplexity_search(
+                url_query,
+                domain_filter=["lu.ma", "meetup.com", "eventbrite.com"]
+            ),
+        )
+        logger.info(
+            "Search results: %d chars, URL results: %d chars",
+            len(search_results), len(url_results)
         )
 
-        # Second search to get actual event URLs
-        url_results = await self._perplexity_search(
-            f"site:lu.ma OR site:meetup.com OR site:eventbrite.com "
-            f"networking {interests_str} {city} 2026 registration link"
+        # Put URL results FIRST so they don't get truncated
+        combined_results = (
+            "EVENT REGISTRATION URLS (lu.ma, meetup.com, eventbrite.com):\n"
+            + url_results[:2000]
+            + "\n\nGENERAL EVENT INFO:\n"
+            + search_results[:2000]
         )
 
-        # Combine both results
-        combined_results = search_results + "\n\nEVENT URLS:\n" + url_results
-
-        # Step 2: Score and rank via Claude directly
         logger.info("Scoring events via Claude direct API")
         scored = await self._claude_score(
             search_results=combined_results,
@@ -100,9 +110,17 @@ class CrewAIClient:
             "status": "completed"
         }
 
-    async def _perplexity_search(self, query: str) -> str:
+    async def _perplexity_search(
+        self, query: str, domain_filter: list[str] | None = None
+    ) -> str:
         """Call Perplexity Sonar API directly."""
         try:
+            payload = {
+                "model": "sonar",
+                "messages": [{"role": "user", "content": query}],
+            }
+            if domain_filter:
+                payload["search_domain_filter"] = domain_filter
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
                     "https://api.perplexity.ai/chat/completions",
@@ -110,10 +128,7 @@ class CrewAIClient:
                         "Authorization": f"Bearer {self._perplexity_key}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": "sonar",
-                        "messages": [{"role": "user", "content": query}],
-                    },
+                    json=payload,
                 )
                 data = resp.json()
                 return data["choices"][0]["message"]["content"]
@@ -134,7 +149,7 @@ class CrewAIClient:
 
         prompt = f"""You are an event discovery and scoring assistant.
 Search results about networking events in {city}:
-{search_results[:4000]}
+{search_results[:5000]}
 Pre-parsed events (may be empty): {json.dumps(raw_events[:3], ensure_ascii=False)[:500]}
 User interests: {interests}
 User budget limit: EUR{budget} per ticket
@@ -152,7 +167,7 @@ For each event provide these exact fields:
 - total_score: integer 0-100 based on relevance to user interests and budget fit
 - recommendation: exactly "strong_recommend" if score>80, "suitable" if score>60, "borderline" if score>40, "skip" otherwise
 - recommendation_reason: one sentence explaining the score
-- source: always "perplexity"
+- source: "luma" if source_url contains "lu.ma", "meetup" if contains "meetup.com", "eventbrite" if contains "eventbrite.com", otherwise "perplexity"
 - source_id: URL-friendly slug of the title (lowercase, hyphens, no spaces)
 - currency: always "EUR"
 - language: "en" or detected language code
@@ -176,7 +191,7 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
                     },
                     json={
                         "model": "claude-haiku-4-5-20251001",
-                        "max_tokens": 4000,
+                        "max_tokens": 4096,
                         "messages": [{"role": "user", "content": prompt}],
                     },
                 )
