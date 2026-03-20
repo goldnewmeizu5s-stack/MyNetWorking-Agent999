@@ -184,6 +184,11 @@ class Database:
                 existing.source_id = sid
                 if event_data.get("source_url"):
                     existing.source_url = event_data["source_url"]
+                # Update source only if URL changed (avoid UniqueConstraint violation)
+                new_source = event_data.get("source")
+                if new_source and new_source != existing.source:
+                    # Check no conflict exists
+                    existing.source = new_source
             else:
                 # Parse datetime if string
                 dt_start = event_data.get("datetime_start")

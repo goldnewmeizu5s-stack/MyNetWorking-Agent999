@@ -257,8 +257,11 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
             if event.get("source_url"):
                 return event  # Already has URL
             title = event.get("title", "")
-            query = f'"{title}" {city} registration site:lu.ma OR site:meetup.com OR site:eventbrite.com'
-            result = await self._perplexity_search(query)
+            query = f'"{title}" {city} event registration 2026'
+            result = await self._perplexity_search(
+                query,
+                domain_filter=["lu.ma", "meetup.com", "eventbrite.com"]
+            )
             # Extract first URL from result
             import re
             urls = re.findall(
@@ -285,12 +288,15 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
 
         enriched = await asyncio.gather(*[find_url(e) for e in events_without_url])
 
-        # Merge back
         url_map = {e.get("title"): e for e in enriched}
+        result_events = []
         for event in events:
-            if event.get("title") in url_map:
-                event.update(url_map[event["title"]])
-        return events
+            title = event.get("title")
+            if title in url_map and url_map[title].get("source_url"):
+                event["source_url"] = url_map[title]["source_url"]
+                event["source"] = url_map[title].get("source", event.get("source", "perplexity"))
+            result_events.append(event)
+        return result_events
 
     async def run_crew(self, inputs: dict, on_progress=None) -> dict:
         """Legacy method - used by debrief and other crews via Platform."""
