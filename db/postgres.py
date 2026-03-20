@@ -162,11 +162,28 @@ class Database:
             existing = result.scalar_one_or_none()
 
             if existing:
+                import re as _re
+                from datetime import datetime as _dt
                 for key, value in event_data.items():
-                    if hasattr(existing, key) and value is not None:
-                        setattr(existing, key, value)
-                # Always update source_id to latest generated value
+                    if not hasattr(existing, key) or value is None:
+                        continue
+                    # Convert datetime strings before setting
+                    if key == "datetime_start" and isinstance(value, str):
+                        try:
+                            value = _dt.fromisoformat(value)
+                        except ValueError:
+                            try:
+                                value = _dt.combine(
+                                    __import__('datetime').date.fromisoformat(value[:10]),
+                                    __import__('datetime').time(0, 0)
+                                )
+                            except Exception:
+                                continue
+                    setattr(existing, key, value)
+                # Always update source_id and source_url explicitly
                 existing.source_id = sid
+                if event_data.get("source_url"):
+                    existing.source_url = event_data["source_url"]
             else:
                 # Parse datetime if string
                 dt_start = event_data.get("datetime_start")
