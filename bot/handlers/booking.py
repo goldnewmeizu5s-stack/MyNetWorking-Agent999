@@ -396,7 +396,19 @@ async def _scan_form_fields(url: str) -> list[dict]:
 
         if proc.returncode == 0:
             result = json.loads(stdout.decode())
-            return result.get("fields", [])
+            fields = result.get("fields", [])
+            # Filter out system/navigation fields
+            SKIP_KEYS = {
+                "search", "search events", "q", "query",
+                "filter", "find", "keyword", "keywords",
+            }
+            fields = [
+                f for f in fields
+                if f.get("key", "").lower().strip() not in SKIP_KEYS
+                and f.get("placeholder", "").lower().strip() not in SKIP_KEYS
+                and len(f.get("key", "")) > 1
+            ]
+            return fields
     except Exception as e:
         logger.warning("Form scan failed: %s", e)
     return []
