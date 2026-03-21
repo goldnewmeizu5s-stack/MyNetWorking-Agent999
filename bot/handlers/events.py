@@ -229,7 +229,7 @@ async def handle_event_details(callback: CallbackQuery, db, **kwargs):
         lines.append(f"\n🔗 <a href='{event.source_url}'>Event page</a>")
     else:
         search_q = urllib.parse.quote_plus(f"{event.title} {event.location_city or ''} 2026".strip())
-        lines.append(f"\n🔍 <a href='https://lu.ma/discover?q={search_q}'>Search on Luma</a>")
+        lines.append(f"\n🔍 <a href='https://www.google.com/search?q={search_q}'>Search on Google</a>")
 
     text = "\n".join(lines)
     keyboard = get_event_keyboard(source_id)

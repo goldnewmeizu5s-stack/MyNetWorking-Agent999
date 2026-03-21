@@ -101,6 +101,15 @@ class CrewAIClient:
             original = scored[key]
             filtered = []
             for ev in original:
+                # Score filter: drop borderline/skip events
+                score = ev.get("total_score", 0)
+                if score < 60:
+                    logger.info(
+                        "Filtered out event '%s' (score %s < 60)",
+                        ev.get("title"), score,
+                    )
+                    continue
+
                 ds = ev.get("datetime_start")
                 if not ds or str(ds) in ("None", "null", ""):
                     filtered.append(ev)  # keep events with unknown date
