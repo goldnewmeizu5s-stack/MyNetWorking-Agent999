@@ -16,7 +16,10 @@ def format_event_card(event: dict) -> str:
     recommendation = event.get("recommendation", "")
     recommendation_reason = event.get("recommendation_reason", "")
     estimated_audience = event.get("estimated_audience")
-    source_url = event.get("source_url", "")
+    source_url = event.get("source_url") or ""
+    # Normalize: treat "null", "None", "n/a" as empty
+    if isinstance(source_url, str) and source_url.strip().lower() in ("null", "none", "n/a", ""):
+        source_url = ""
 
     # Score label
     if score >= 80:
@@ -64,13 +67,16 @@ def format_event_card(event: dict) -> str:
     if recommendation_reason and str(recommendation_reason) not in ("None", ""):
         card += f"\n{recommendation_reason}"
 
-    if source_url and str(source_url) not in ("None", ""):
-        card += f"\n🔗 <a href='{source_url}'>Event page</a>"
+    if source_url and source_url.startswith("http"):
+        if "google.com/search" in source_url:
+            card += f"\n🔍 <a href='{source_url}'>Search event</a>"
+        else:
+            card += f"\n🔗 <a href='{source_url}'>Event page</a>"
     else:
         # Fallback: search link so user can find it themselves
         import urllib.parse
         query = urllib.parse.quote_plus(f"{title} {location_city} 2026")
-        card += f"\n🔍 <a href='https://lu.ma/discover?q={query}'>Search on Luma</a>"
+        card += f"\n🔍 <a href='https://www.google.com/search?q={query}'>Search event</a>"
 
     return card
 

@@ -1,7 +1,9 @@
 """Handler for /events command - triggers DiscoveryCrew."""
 import json
 import logging
+import re
 import traceback
+import urllib.parse
 from datetime import date, timedelta
 
 from aiogram import Router
@@ -114,6 +116,10 @@ async def handle_events(
     # 6. Parse result — handle multiple possible formats
     top_events = _parse_crew_result(result)
 
+    # 6.5 Merge source_url from raw_events into scored events
+    if top_events:
+        top_events = _merge_urls(top_events, raw_events, city)
+
     if top_events is None:
         await error_forwarder.send_error(
             "events: parse result",
@@ -174,6 +180,74 @@ def _parse_crew_result(result: dict) -> list | None:
         return None
 
 
+def _normalize_title(title: str) -> str:
+    """Normalize title for fuzzy matching."""
+    return re.sub(r"[^a-z0-9]", "", title.lower())
+
+
+def _is_valid_url(url) -> bool:
+    """Check if url is a real HTTP(S) URL, not null/None/empty."""
+    if not url or not isinstance(url, str):
+        return False
+    url = url.strip()
+    return url.startswith("http://") or url.startswith("https://")
+
+
+def _merge_urls(scored_events: list, raw_events: list, city: str) -> list:
+    """Merge source_url from raw API events into Claude-scored events.
+
+    Claude often returns source_url=null for events found via Perplexity.
+    Raw events from Luma/Meetup have verified URLs — match by title and copy.
+    For unmatched events, generate a search URL as fallback.
+    """
+    # Build lookup: normalized_title → source_url from raw events
+    url_map: dict[str, str] = {}
+    for raw in raw_events:
+        url = raw.get("source_url", "")
+        if _is_valid_url(url):
+            norm = _normalize_title(raw.get("title", ""))
+            if norm:
+                url_map[norm] = url
+
+    matched = 0
+    generated = 0
+    for event in scored_events:
+        existing_url = event.get("source_url")
+
+        # Normalize: convert "null", None, empty to ""
+        if not _is_valid_url(existing_url):
+            event["source_url"] = ""
+
+        # Try to match from raw events by title
+        if not _is_valid_url(event.get("source_url")):
+            norm_title = _normalize_title(event.get("title", ""))
+            # Exact match
+            if norm_title in url_map:
+                event["source_url"] = url_map[norm_title]
+                matched += 1
+                continue
+            # Substring match (e.g. "Web Summit" in "Web Summit 2026 Lisbon")
+            for raw_norm, raw_url in url_map.items():
+                if norm_title in raw_norm or raw_norm in norm_title:
+                    event["source_url"] = raw_url
+                    matched += 1
+                    break
+
+        # If still no URL — generate a search URL
+        if not _is_valid_url(event.get("source_url")):
+            title = event.get("title", "")
+            loc = event.get("location_city") or city
+            query = urllib.parse.quote_plus(f"{title} {loc}")
+            event["source_url"] = f"https://www.google.com/search?q={query}"
+            generated += 1
+
+    logger.info(
+        "URL merge: %d matched from raw, %d generated search links, %d already had URLs",
+        matched, generated, len(scored_events) - matched - generated,
+    )
+    return scored_events
+
+
 async def _show_events(message: Message, events: list, city: str, db, user_id: int):
     """Display event cards and save to DB."""
     if not events:
@@ -183,7 +257,6 @@ async def _show_events(message: Message, events: list, city: str, db, user_id: i
     await message.answer(f"Found {len(events)} events in {city}:")
     for event in events:
         # Generate source_id FIRST before saving
-        import re
         source_id = event.get("source_id") or ""
         if not source_id:
             source_id = re.sub(
