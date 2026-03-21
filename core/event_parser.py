@@ -301,39 +301,70 @@ class EventParser:
         """
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.post(
-                    "https://api.meetup.com/gql",
-                    json={
-                        "query": query,
-                        "variables": {
-                            "query": keyword,
-                            "lat": lat,
-                            "lon": lon,
-                            "radius": radius_km,
+                try:
+                    resp = await client.post(
+                        "https://api.meetup.com/gql",
+                        json={
+                            "query": query,
+                            "variables": {
+                                "query": keyword,
+                                "lat": lat,
+                                "lon": lon,
+                                "radius": radius_km,
+                            },
                         },
-                    },
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                    },
+                        headers={
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                        },
+                    )
+                except httpx.TimeoutException:
+                    logger.warning("Meetup GraphQL timed out")
+                    return []
+                except httpx.ConnectError as ce:
+                    logger.warning("Meetup GraphQL connect error: %s", ce)
+                    return []
+
+                logger.info(
+                    "Meetup GraphQL response: status=%d, content-type=%s, body[:300]=%s",
+                    resp.status_code,
+                    resp.headers.get("content-type", "?"),
+                    resp.text[:300],
                 )
+
                 if resp.status_code != 200:
                     logger.warning("Meetup GraphQL status: %d", resp.status_code)
                     return []
 
-                data = resp.json()
+                try:
+                    data = resp.json()
+                except json.JSONDecodeError as je:
+                    logger.error(
+                        "Meetup GraphQL non-JSON (status=%d): %s | body[:300]=%s",
+                        resp.status_code, je, resp.text[:300],
+                    )
+                    return []
+
+                logger.info(
+                    "Meetup GraphQL top-level keys: %s", list(data.keys()),
+                )
+
                 edges = (
                     data.get("data", {})
                     .get("keywordSearch", {})
                     .get("edges", [])
                 )
+                logger.info("Meetup GraphQL edges found: %d", len(edges))
                 return [
                     self._meetup_node_to_event(e["node"]["result"])
                     for e in edges
                     if e.get("node", {}).get("result", {}).get("id")
                 ]
+        except (httpx.TimeoutException, httpx.ConnectError) as net_err:
+            logger.error("Meetup GraphQL network failure: %s", net_err)
+            return []
         except Exception as e:
-            logger.warning("Meetup GraphQL failed: %s", e)
+            logger.error("Meetup GraphQL unexpected error: %s", e, exc_info=True)
             return []
 
     async def _meetup_html(
@@ -342,23 +373,38 @@ class EventParser:
         """Fallback: scrape meetup.com/find, extract JSON-LD."""
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.get(
-                    "https://www.meetup.com/find/events/",
-                    params={
-                        "allMeetups": "true",
-                        "lat": lat,
-                        "lon": lon,
-                        "radius": 25,
-                        "keywords": keyword,
-                    },
-                    headers={
-                        "User-Agent": (
-                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                            "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
-                        ),
-                        "Accept-Language": "en-US,en;q=0.9",
-                    },
+                try:
+                    resp = await client.get(
+                        "https://www.meetup.com/find/events/",
+                        params={
+                            "allMeetups": "true",
+                            "lat": lat,
+                            "lon": lon,
+                            "radius": 25,
+                            "keywords": keyword,
+                        },
+                        headers={
+                            "User-Agent": (
+                                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+                            ),
+                            "Accept-Language": "en-US,en;q=0.9",
+                        },
+                    )
+                except httpx.TimeoutException:
+                    logger.warning("Meetup HTML timed out")
+                    return []
+                except httpx.ConnectError as ce:
+                    logger.warning("Meetup HTML connect error: %s", ce)
+                    return []
+
+                logger.info(
+                    "Meetup HTML response: status=%d, content-type=%s, body[:300]=%s",
+                    resp.status_code,
+                    resp.headers.get("content-type", "?"),
+                    resp.text[:300],
                 )
+
                 if resp.status_code != 200:
                     logger.warning("Meetup HTML status: %d", resp.status_code)
                     return []
@@ -407,8 +453,11 @@ class EventParser:
 
                 logger.info("Meetup HTML parsed %d events", len(events))
                 return events[:15]
+        except (httpx.TimeoutException, httpx.ConnectError) as net_err:
+            logger.error("Meetup HTML network failure: %s", net_err)
+            return []
         except Exception as e:
-            logger.warning("Meetup HTML scraping failed: %s", e)
+            logger.error("Meetup HTML unexpected error: %s", e, exc_info=True)
             return []
 
     def _meetup_node_to_event(self, node: dict) -> dict:
