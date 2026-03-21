@@ -72,7 +72,11 @@ def book_luma(url: str, form_data: dict) -> dict:
 
 
 def book_meetup(url: str, form_data: dict) -> dict:
-    """RSVP on Meetup via Playwright."""
+    """RSVP on Meetup via Playwright.
+
+    Meetup requires OAuth for RSVP — we detect this and return
+    a manual_required status with the link instead of failing silently.
+    """
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -81,22 +85,69 @@ def book_meetup(url: str, form_data: dict) -> dict:
             page.goto(url, timeout=30000)
             page.wait_for_timeout(2000)
 
+            page_text = page.text_content("body") or ""
+            page_url = page.url
+
+            # Detect login redirect — Meetup sends you to /login
+            if "meetup.com/login" in page_url or "secure.meetup.com" in page_url:
+                return {
+                    "status": "manual_required",
+                    "reason": "meetup_auth",
+                    "url": url,
+                }
+
+            # Detect login wall on page
+            login_indicators = [
+                "sign in to rsvp",
+                "log in to rsvp",
+                "join to attend",
+                "sign up to attend",
+                "create account",
+            ]
+            if any(ind in page_text.lower() for ind in login_indicators):
+                return {
+                    "status": "manual_required",
+                    "reason": "meetup_auth",
+                    "url": url,
+                }
+
+            # Try to find RSVP/Attend button
             attend_btn = page.locator(
-                "button:has-text('Attend'), button:has-text('RSVP')"
+                "button:has-text('Attend'), "
+                "button:has-text('RSVP'), "
+                "a:has-text('Attend'), "
+                "a:has-text('RSVP')"
             )
             if attend_btn.count() == 0:
+                # No button visible — likely requires auth or already RSVPd
                 return {
-                    "status": "failed",
-                    "error": "Attend button not found",
+                    "status": "manual_required",
+                    "reason": "no_rsvp_button",
+                    "url": url,
                 }
+
             attend_btn.first.click()
             page.wait_for_timeout(3000)
 
-            page_text = page.text_content("body") or ""
-            if "going" in page_text.lower() or "rsvp" in page_text.lower():
+            # Check for login redirect after click
+            if "meetup.com/login" in page.url:
+                return {
+                    "status": "manual_required",
+                    "reason": "meetup_auth_after_click",
+                    "url": url,
+                }
+
+            page_text_after = page.text_content("body") or ""
+            if any(w in page_text_after.lower() for w in
+                   ["you're going", "you are going", "attending", "rsvp'd"]):
                 return {"status": "confirmed"}
             else:
-                return {"status": "unknown", "page_text": page_text[:500]}
+                return {
+                    "status": "manual_required",
+                    "reason": "unknown_result",
+                    "url": url,
+                    "page_text": page_text_after[:300],
+                }
 
         except Exception as e:
             return {"status": "failed", "error": str(e)}

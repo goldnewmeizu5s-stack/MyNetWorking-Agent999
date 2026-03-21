@@ -285,7 +285,7 @@ async def handle_brief_confirm(
 
     if browser_result["status"] == "confirmed":
         await callback.message.answer(
-            f"Registered for {data['event_title']}!\n"
+            f"✅ Registered for {data['event_title']}!\n"
             "Will remind you 24h and 2h before.",
             reply_markup=get_main_keyboard(),
         )
@@ -293,18 +293,43 @@ async def handle_brief_confirm(
 
     elif browser_result["status"] == "waitlisted":
         await callback.message.answer(
-            "You're on the waitlist. I'll check and notify you.",
+            "⏳ You're on the waitlist. I'll check and notify you.",
             reply_markup=get_main_keyboard(),
         )
         await db.update_event_status(event_id, "waitlisted")
 
+    elif browser_result["status"] == "manual_required":
+        # Meetup requires auth OR Luma has unusual flow
+        reason = browser_result.get("reason", "")
+        url = browser_result.get("url") or event_url
+        if "meetup_auth" in reason:
+            msg = (
+                f"📋 <b>Meetup requires login to RSVP.</b>\n\n"
+                f"Your details are saved — just tap the link and RSVP:\n"
+                f"👉 <a href='{url}'>Open event page</a>\n\n"
+                f"Name: {form_data.get('name', '')}\n"
+                f"Email: {form_data.get('email', '')}"
+            )
+        else:
+            msg = (
+                f"📋 <b>Manual registration needed.</b>\n\n"
+                f"Your details are saved:\n"
+                f"👉 <a href='{url}'>Open event page</a>\n\n"
+                f"Name: {form_data.get('name', '')}\n"
+                f"Email: {form_data.get('email', '')}"
+            )
+        await callback.message.answer(msg, parse_mode="HTML",
+                                      reply_markup=get_main_keyboard())
+
     else:
+        # Generic failure
         event = await db.get_event(event_id)
-        url = event.source_url if event else data["event_url"]
+        url = event.source_url if event else event_url
         await callback.message.answer(
-            "Couldn't auto-register.\n"
-            f"Here's the link: {url}\n"
+            f"⚠️ Couldn't auto-register.\n"
+            f"👉 <a href='{url}'>Open event page</a>\n"
             "Your data has been saved for next time.",
+            parse_mode="HTML",
             reply_markup=get_main_keyboard(),
         )
 
