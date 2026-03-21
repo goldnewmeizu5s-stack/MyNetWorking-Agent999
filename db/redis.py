@@ -37,3 +37,13 @@ class RedisCache:
     async def delete(self, key: str) -> None:
         if self._redis:
             await self._redis.delete(key)
+
+    async def delete_by_pattern(self, pattern: str) -> int:
+        """Delete all keys matching pattern. Returns count of deleted keys."""
+        if not self._redis:
+            return 0
+        count = 0
+        async for key in self._redis.scan_iter(match=pattern):
+            await self._redis.delete(key)
+            count += 1
+        return count

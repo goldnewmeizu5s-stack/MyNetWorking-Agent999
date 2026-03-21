@@ -51,7 +51,7 @@ class EventParser:
 
         unique = self._deduplicate(raw_events)
 
-        if self.cache:
+        if self.cache and unique:
             await self.cache.setex(
                 cache_key, 3600 * 6, json.dumps(unique, default=str)
             )

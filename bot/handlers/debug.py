@@ -47,6 +47,23 @@ async def handle_debug(message: Message, db, **kwargs):
         await message.answer(f"Debug error: {e}")
 
 
+@router.message(Command("clearcache"))
+async def handle_clearcache(message: Message, redis=None, **kwargs):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("Admin only.")
+        return
+
+    if not redis:
+        await message.answer("Redis not connected.")
+        return
+
+    try:
+        count = await redis.delete_by_pattern("events:cache:*")
+        await message.answer(f"Cleared {count} event cache key(s).")
+    except Exception as e:
+        await message.answer(f"Error clearing cache: {e}")
+
+
 @router.message(Command("env"))
 async def handle_env(message: Message, **kwargs):
     if message.from_user.id != ADMIN_ID:
