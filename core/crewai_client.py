@@ -224,32 +224,56 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
 
     async def find_event_url(self, event_title: str, city: str) -> str | None:
         """Search for event registration URL at booking time."""
-        # Search specifically on event platforms
+        # Clean title - remove parenthetical suffixes that Claude adds
+        import re as _re
+        clean_title = _re.sub(r'\s*\([^)]*\)', '', event_title).strip()
+        # Take first 4-5 words only for better search
+        words = clean_title.split()
+        short_title = " ".join(words[:5])
+        logger.info("Searching URL for: '%s' (from '%s')", short_title, event_title)
+
+        # Try 1: domain-filtered search with short title
         result = await self._perplexity_search(
-            f"{event_title} {city} 2026",
+            f"{short_title} {city} event 2026",
             domain_filter=["lu.ma", "meetup.com", "eventbrite.com"]
         )
-        if not result:
-            return None
-
-        # Extract URLs
-        urls = re.findall(
+        urls = _re.findall(
             r'https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com)/[\w\-/]+',
             result
         )
         if urls:
-            logger.info("Found URL for '%s': %s", event_title, urls[0])
+            logger.info("Found URL (attempt 1): %s", urls[0])
             return urls[0]
 
-        # Fallback: try general search
+        # Try 2: broader search without domain filter
         result2 = await self._perplexity_search(
-            f'"{event_title}" registration link 2026'
+            f"{short_title} {city} registration 2026"
         )
-        urls2 = re.findall(
+        urls2 = _re.findall(
             r'https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com)/[\w\-/]+',
             result2
         )
-        return urls2[0] if urls2 else None
+        if urls2:
+            logger.info("Found URL (attempt 2): %s", urls2[0])
+            return urls2[0]
+
+        # Try 3: just first 2-3 words + city
+        if len(words) > 3:
+            ultra_short = " ".join(words[:3])
+            result3 = await self._perplexity_search(
+                f"{ultra_short} {city} 2026",
+                domain_filter=["lu.ma", "meetup.com", "eventbrite.com"]
+            )
+            urls3 = _re.findall(
+                r'https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com)/[\w\-/]+',
+                result3
+            )
+            if urls3:
+                logger.info("Found URL (attempt 3): %s", urls3[0])
+                return urls3[0]
+
+        logger.warning("No URL found for '%s' after 3 attempts", event_title)
+        return None
 
     async def run_crew(self, inputs: dict, on_progress=None) -> dict:
         """Legacy method - used by debrief and other crews via Platform."""
