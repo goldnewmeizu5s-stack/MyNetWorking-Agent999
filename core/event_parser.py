@@ -78,11 +78,47 @@ class EventParser:
                     },
                 )
 
+                logger.info(
+                    "Luma API response: status=%d, body[:200]=%s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
+
+                if resp.status_code in (401, 403):
+                    logger.warning(
+                        "Luma API %d, trying fallback endpoint", resp.status_code
+                    )
+                    resp = await client.get(
+                        "https://lu.ma/api/v2/event/get-events-for-discover",
+                        params={
+                            "pagination_limit": 30,
+                            "geo_latitude": lat,
+                            "geo_longitude": lon,
+                        },
+                        headers={
+                            "Accept": "application/json",
+                            "User-Agent": "Mozilla/5.0",
+                        },
+                    )
+                    logger.info(
+                        "Luma fallback response: status=%d, body[:200]=%s",
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+
                 if resp.status_code != 200:
-                    logger.warning("Luma API status: %d", resp.status_code)
+                    logger.warning("Luma API final status: %d", resp.status_code)
                     return []
 
-                data = resp.json()
+                try:
+                    data = resp.json()
+                except json.JSONDecodeError as je:
+                    logger.error(
+                        "Luma API returned non-JSON: %s | body[:300]=%s",
+                        je,
+                        resp.text[:300],
+                    )
+                    return []
 
                 # Log raw structure to diagnose response shape in Railway logs
                 logger.info(
