@@ -40,10 +40,17 @@ class CrewAIClient:
         interests_str = ", ".join(interests[:3])
 
         logger.info("Perplexity search for %s in %s", interests_str, city)
-        search_results = await self._perplexity_search(
-            f"upcoming networking events {interests_str} in {city} 2026"
+        # Run two searches in parallel for more coverage
+        search1, search2 = await asyncio.gather(
+            self._perplexity_search(
+                f"upcoming networking events {interests_str} in {city} 2026"
+            ),
+            self._perplexity_search(
+                f"tech conferences meetups AI startups {city} April May 2026"
+            ),
         )
-        logger.info("Search results: %d chars", len(search_results))
+        search_results = search1 + "\n\n" + search2
+        logger.info("Search results: %d chars total", len(search_results))
 
         scored = await self._claude_score(
             search_results=search_results,
@@ -143,7 +150,7 @@ Pre-parsed events from Luma/Meetup API (these have REAL verified URLs - use them
 } for e in raw_events[:10]], ensure_ascii=False)[:2000]}
 User interests: {interests}
 User budget limit: EUR{budget} per ticket
-Your task: extract and score up to 5 networking events from the search results.
+Your task: extract and score up to 8 networking events from the search results.
 For each event provide these exact fields:
 - title: event name as string
 - datetime_start: date string "YYYY-MM-DD" or null if unknown
@@ -167,7 +174,7 @@ Scoring guide:
 - Low score (40-59): tangentially related, significantly over budget
 - Skip (0-39): irrelevant to user interests
 Return ONLY a valid JSON object with this exact structure:
-{{"top_events": [list of up to 5 best events], "scored_events": [same list]}}
+{{"top_events": [list of up to 8 best events], "scored_events": [same list]}}
 No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
 
         try:

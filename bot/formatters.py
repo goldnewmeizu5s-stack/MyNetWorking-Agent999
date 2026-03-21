@@ -66,6 +66,11 @@ def format_event_card(event: dict) -> str:
 
     if source_url and str(source_url) not in ("None", ""):
         card += f"\n🔗 <a href='{source_url}'>Event page</a>"
+    else:
+        # Fallback: search link so user can find it themselves
+        import urllib.parse
+        query = urllib.parse.quote_plus(f"{title} {location_city} 2026")
+        card += f"\n🔍 <a href='https://lu.ma/discover?q={query}'>Search on Luma</a>"
 
     return card
 
