@@ -38,6 +38,20 @@ class CrewAIClient:
         r"/[\w\-/.?=&%#@!+]+"
     )
 
+    # Aggregator domains that pollute search results with low-quality listings
+    _CITATION_BLACKLIST = {
+        "allconferencealert.com",
+        "allconferencealert.net",
+        "conferencealerts.co.in",
+        "conferenceindex.org",
+        "conferencenext.com",
+        "internationalconferencealerts.com",
+        "conferenceineurope.org",
+        "bleap.finance",
+        "buyerforesight.com",
+        "dev.events",
+    }
+
     async def run_discovery(self, raw_events: list, context: dict) -> dict:
         """Run discovery: parallel Perplexity searches + Claude scoring."""
         user_profile = context.get("user_profile", {})
@@ -49,10 +63,12 @@ class CrewAIClient:
 
         results = await asyncio.gather(
             self._perplexity_search(
-                f"upcoming networking events {interests_str} in {city} 2026"
+                f"networking drinks meetup informal community {interests_str} {city} "
+                f"site:lu.ma OR site:meetup.com 2026"
             ),
             self._perplexity_search(
-                f"tech conference meetup AI startups {city} April May June 2026"
+                f"lu.ma events tech startup networking {city} 2026",
+                domain_filter=["lu.ma"],
             ),
             self._perplexity_search(
                 f"meetup.com events networking {city} 2026",
@@ -76,10 +92,19 @@ class CrewAIClient:
         # Fallback: regex-extract from text for any URLs not in citations
         raw_urls = self._URL_RE.findall(search_results)
         regex_urls = [u if u.startswith("http") else f"https://{u}" for u in raw_urls]
-        extracted_urls = list(dict.fromkeys(all_citations + regex_urls))
+        merged_urls = list(dict.fromkeys(all_citations + regex_urls))
+
+        # Filter out aggregator spam domains
+        extracted_urls = [
+            u for u in merged_urls
+            if not any(bl in u for bl in self._CITATION_BLACKLIST)
+        ]
+        blocked = len(merged_urls) - len(extracted_urls)
+        if blocked:
+            logger.info("Blocked %d aggregator URLs", blocked)
         logger.info(
-            "URLs: %d from citations + %d from regex = %d unique",
-            len(all_citations), len(regex_urls), len(extracted_urls),
+            "URLs: %d from citations + %d from regex = %d unique (%d after blacklist)",
+            len(all_citations), len(regex_urls), len(merged_urls), len(extracted_urls),
         )
 
         today = date.today()
@@ -247,10 +272,12 @@ For each event provide these exact fields:
 - currency: always "EUR"
 - language: "en" or detected language code
 
+Event priority: Prioritize casual networking events, community meetups, drinks & networking, informal tech gatherings. Deprioritize academic conferences, paper submission events, and formal multi-day conferences — these score maximum 50 regardless of topic match.
+
 Scoring guide:
-- 80-100: directly matches user interests, within budget, confirmed real event
+- 80-100: directly matches user interests, within budget, confirmed real event, casual/community format
 - 60-79: partially matches interests or slightly over budget
-- 40-59: tangentially related or significantly over budget
+- 40-59: tangentially related, significantly over budget, or academic/formal conference format
 - 0-39: irrelevant to user interests
 
 Return ONLY a valid JSON object with this exact structure (no markdown, no code blocks, no explanation):
