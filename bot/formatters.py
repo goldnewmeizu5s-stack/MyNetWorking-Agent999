@@ -1,5 +1,7 @@
 """Format event cards and other data for Telegram display."""
 
+import urllib.parse
+
 
 def format_event_card(event: dict) -> str:
     """Format a scored event as an HTML card for Telegram."""
@@ -13,7 +15,6 @@ def format_event_card(event: dict) -> str:
     transport_cost = event.get("transport_cost", 0)
     transport_duration = event.get("transport_duration_min", 0)
     language = event.get("language", "")
-    recommendation = event.get("recommendation", "")
     recommendation_reason = event.get("recommendation_reason", "")
     estimated_audience = event.get("estimated_audience")
     source_url = event.get("source_url", "")
@@ -64,13 +65,13 @@ def format_event_card(event: dict) -> str:
     if recommendation_reason and str(recommendation_reason) not in ("None", ""):
         card += f"\n{recommendation_reason}"
 
+    # URL or fallback search link
     if source_url and str(source_url) not in ("None", ""):
         card += f"\n🔗 <a href='{source_url}'>Event page</a>"
     else:
-        # Fallback: search link so user can find it themselves
-        import urllib.parse
-        query = urllib.parse.quote_plus(f"{title} {location_city} 2026")
-        card += f"\n🔍 <a href='https://lu.ma/discover?q={query}'>Search on Luma</a>"
+        search_term = f"{title} {location_city} 2026".strip()
+        luma_q = urllib.parse.quote_plus(search_term)
+        card += f"\n🔍 <a href='https://lu.ma/discover?q={luma_q}'>Search on Luma</a>"
 
     return card
 
