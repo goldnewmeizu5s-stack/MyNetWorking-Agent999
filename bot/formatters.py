@@ -70,8 +70,8 @@ def format_event_card(event: dict) -> str:
         card += f"\n🔗 <a href='{source_url}'>Event page</a>"
     else:
         search_term = f"{title} {location_city} 2026".strip()
-        luma_q = urllib.parse.quote_plus(search_term)
-        card += f"\n🔍 <a href='https://lu.ma/discover?q={luma_q}'>Search on Luma</a>"
+        google_q = urllib.parse.quote_plus(search_term)
+        card += f"\n🔍 <a href='https://www.google.com/search?q={google_q}'>Search on Google</a>"
 
     return card
 
