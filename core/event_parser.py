@@ -84,15 +84,29 @@ class EventParser:
                     logger.warning("Luma API status: %d", resp.status_code)
                     return []
                 data = resp.json()
-                # Response: {"entries": [{"event": {...}, "url": "lu.ma/xxx"}, ...]}
-                entries = data.get("entries", [])
+                logger.info("Luma API raw keys: %s", list(data.keys())[:10])
+                logger.info("Luma API sample: %s", str(data)[:500])
+                # Try multiple response structures
+                entries = (
+                    data.get("entries")
+                    or data.get("events")
+                    or data.get("data", {}).get("entries")
+                    or data.get("data", {}).get("events")
+                    or []
+                )
                 logger.info("Luma API returned %d entries", len(entries))
                 for entry in entries:
-                    ev = entry.get("event", {})
-                    if not ev:
+                    # entry может быть либо {"event": {...}, "url": "..."} либо прямо объектом события
+                    ev = entry.get("event") or entry if isinstance(entry, dict) else {}
+                    if not ev or not (ev.get("name") or ev.get("title")):
                         continue
-                    # Build full URL
-                    slug = entry.get("url") or ev.get("url") or ""
+                    slug = (
+                        entry.get("url")
+                        or ev.get("url")
+                        or ev.get("slug")
+                        or ev.get("api_id")
+                        or ""
+                    )
                     if slug and not slug.startswith("http"):
                         full_url = f"https://lu.ma/{slug}"
                     elif slug.startswith("http"):
