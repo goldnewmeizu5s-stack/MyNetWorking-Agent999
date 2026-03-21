@@ -2,11 +2,12 @@
 import json
 import logging
 import traceback
+import urllib.parse
 from datetime import date, timedelta
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from bot.formatters import format_event_card
 from bot.keyboards import get_event_keyboard, get_main_keyboard
@@ -158,3 +159,84 @@ async def _show_events(message: Message, events: list, city: str, db, user_id: i
             title = event.get("title", "Event")
             url = event.get("source_url", "")
             await message.answer(f"{title}\n{url}", reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("details:"))
+async def handle_event_details(callback: CallbackQuery, db, **kwargs):
+    """Show full event details from DB."""
+    source_id = callback.data.split(":", 1)[1]
+    event = await db.get_event(source_id)
+
+    if not event:
+        await callback.answer("Event not found", show_alert=True)
+        return
+
+    # Build detailed card
+    lines = [f"<b>{event.title}</b>"]
+
+    if event.description and str(event.description) not in ("None", ""):
+        lines.append(f"\n{event.description}")
+
+    if event.datetime_start:
+        dt_str = event.datetime_start.strftime("%A, %d %B %Y %H:%M")
+        lines.append(f"\n📅 <b>Date:</b> {dt_str}")
+
+    if event.event_type and str(event.event_type) not in ("None", ""):
+        lines.append(f"🏷 <b>Type:</b> {event.event_type}")
+
+    if event.organizer_name and str(event.organizer_name) not in ("None", ""):
+        lines.append(f"👤 <b>Organizer:</b> {event.organizer_name}")
+
+    location_parts = []
+    if event.location_name and str(event.location_name) not in ("None", ""):
+        location_parts.append(event.location_name)
+    if event.location_address and str(event.location_address) not in ("None", ""):
+        location_parts.append(event.location_address)
+    if event.location_city and str(event.location_city) not in ("None", ""):
+        location_parts.append(event.location_city)
+    if location_parts:
+        lines.append(f"📍 <b>Location:</b> {', '.join(location_parts)}")
+
+    if event.ticket_price is not None:
+        currency = event.currency or "EUR"
+        if event.ticket_price == 0:
+            lines.append("🎟 <b>Price:</b> Free")
+        else:
+            lines.append(f"🎟 <b>Price:</b> {currency}{event.ticket_price:.0f}")
+
+    if event.transport_cost and float(event.transport_cost) > 0:
+        transport = f"🚌 <b>Transport:</b> €{float(event.transport_cost):.2f}"
+        if event.transport_duration_min and int(event.transport_duration_min) > 0:
+            transport += f" (~{event.transport_duration_min} min)"
+        lines.append(transport)
+
+    if event.total_estimated_cost and float(event.total_estimated_cost) > 0:
+        lines.append(f"💰 <b>Total est. cost:</b> €{float(event.total_estimated_cost):.2f}")
+
+    if event.language and str(event.language) not in ("None", ""):
+        lines.append(f"🗣 <b>Language:</b> {event.language.upper()}")
+
+    if event.capacity and int(event.capacity) > 0:
+        lines.append(f"👥 <b>Capacity:</b> {event.capacity}")
+
+    if event.total_score:
+        lines.append(f"\n⭐️ <b>Score:</b> {event.total_score:.0f}/100")
+
+    if event.recommendation_reason and str(event.recommendation_reason) not in ("None", ""):
+        lines.append(f"💡 {event.recommendation_reason}")
+
+    if event.source_url and str(event.source_url) not in ("None", ""):
+        lines.append(f"\n🔗 <a href='{event.source_url}'>Event page</a>")
+    else:
+        search_q = urllib.parse.quote_plus(f"{event.title} {event.location_city or ''} 2026".strip())
+        lines.append(f"\n🔍 <a href='https://lu.ma/discover?q={search_q}'>Search on Luma</a>")
+
+    text = "\n".join(lines)
+    keyboard = get_event_keyboard(source_id)
+
+    try:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer(f"{event.title}\n{event.source_url or ''}", reply_markup=keyboard)
+
+    await callback.answer()

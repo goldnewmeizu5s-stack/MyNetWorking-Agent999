@@ -197,6 +197,14 @@ class Database:
             existing = result.scalar_one_or_none()
 
             if existing:
+                # Don't overwrite user decisions — skip re-discovery updates
+                if existing.status in ("skipped", "confirmed"):
+                    logger.debug(
+                        "Skipping upsert for event '%s' (status=%s)",
+                        sid, existing.status,
+                    )
+                    return
+
                 import re as _re
                 from datetime import datetime as _dt
                 for key, value in event_data.items():
