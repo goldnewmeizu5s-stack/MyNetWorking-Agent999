@@ -31,8 +31,9 @@ class CrewAIClient:
         self._perplexity_key = os.environ.get("PERPLEXITY_API_KEY", "")
         self._anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
+    # Matches both full URLs (https://lu.ma/...) and bare domains (lu.ma/...)
     _URL_RE = re.compile(
-        r"https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com|ethglobal\.com)"
+        r"(?:https?://)?(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com|ethglobal\.com)"
         r"/[\w\-/.?=&%#@!+]+"
     )
 
@@ -58,11 +59,20 @@ class CrewAIClient:
             ),
         )
 
+        # Log previews to understand Perplexity response format
+        logger.info("Perplexity search1 preview: %s", search1[:500])
+        logger.info("Perplexity search2 preview: %s", search2[:500])
+        logger.info("Perplexity search3 preview: %s", search3[:500])
+
         search_results = "\n\n".join(filter(None, [search1, search2, search3]))
         logger.info("Search results: %d chars total", len(search_results))
 
         # Pre-extract all event URLs before sending to Claude
-        extracted_urls = list(dict.fromkeys(self._URL_RE.findall(search_results)))
+        # Normalize: add https:// to bare domain matches (lu.ma/..., meetup.com/...)
+        raw_urls = self._URL_RE.findall(search_results)
+        extracted_urls = list(dict.fromkeys(
+            u if u.startswith("http") else f"https://{u}" for u in raw_urls
+        ))
         logger.info("Extracted %d unique URLs from search results", len(extracted_urls))
 
         scored = await self._claude_score(
