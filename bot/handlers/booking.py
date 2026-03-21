@@ -83,7 +83,7 @@ def _format_brief(form_data: dict, fields: list[dict]) -> str:
 
 @router.callback_query(F.data.startswith("book:"))
 async def handle_booking(
-    callback: CallbackQuery, state: FSMContext, db, **kwargs
+    callback: CallbackQuery, state: FSMContext, db, crewai_client, **kwargs
 ):
     event_id = callback.data.split(":")[1]
     user_id = callback.from_user.id
@@ -99,8 +99,31 @@ async def handle_booking(
         f"Preparing registration for: {event.title}..."
     )
 
-    # 1. Scan form fields via Playwright
+    # If no URL — search for it NOW at booking time
     source_url = event.source_url or ""
+    if not source_url or not source_url.startswith("http"):
+        await callback.message.answer("🔍 Finding registration page...")
+        try:
+            found_url = await crewai_client.find_event_url(
+                event_title=event.title,
+                city=event.location_city or "Lisbon",
+            )
+            if found_url:
+                source_url = found_url
+                # Save URL to DB for future use
+                await db.upsert_event(user_id, {
+                    "source_id": event.source_id,
+                    "source_url": found_url,
+                    "title": event.title,
+                    "source": "luma" if "lu.ma" in found_url
+                              else "meetup" if "meetup.com" in found_url
+                              else event.source,
+                })
+                logger.info("Found URL at booking time: %s", found_url)
+        except Exception as e:
+            logger.warning("URL search at booking time failed: %s", e)
+
+    # 1. Scan form fields via Playwright
     if source_url and source_url.startswith("http"):
         fields = await _scan_form_fields(source_url)
     else:
@@ -133,7 +156,7 @@ async def handle_booking(
     # Store state
     await state.update_data(
         event_id=event_id,
-        event_url=event.source_url,
+        event_url=source_url,
         event_source=event.source,
         event_title=event.title,
         fields=fields,
