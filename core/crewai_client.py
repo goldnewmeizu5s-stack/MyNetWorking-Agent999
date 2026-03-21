@@ -39,46 +39,18 @@ class CrewAIClient:
         interests = user_profile.get("interests", ["AI", "startups"])
         interests_str = ", ".join(interests[:3])
 
-        logger.info("Starting parallel Perplexity searches for %s in %s", interests_str, city)
-
-
-        # Run both searches in PARALLEL
-        general_query = f"upcoming networking events {interests_str} in {city} 2026"
-        url_query = f"networking events {interests_str} {city} 2026"
-        search_results, url_results = await asyncio.gather(
-            self._perplexity_search(general_query),
-            self._perplexity_search(
-                url_query,
-                domain_filter=["lu.ma", "meetup.com", "eventbrite.com"]
-            ),
+        logger.info("Perplexity search for %s in %s", interests_str, city)
+        search_results = await self._perplexity_search(
+            f"upcoming networking events {interests_str} in {city} 2026"
         )
-        logger.info(
-            "Search results: %d chars, URL results: %d chars",
-            len(search_results), len(url_results)
-        )
+        logger.info("Search results: %d chars", len(search_results))
 
-        # Put URL results FIRST so they don't get truncated
-        combined_results = (
-            "EVENT REGISTRATION URLS (lu.ma, meetup.com, eventbrite.com):\n"
-            + url_results[:2000]
-            + "\n\nGENERAL EVENT INFO:\n"
-            + search_results[:2000]
-        )
-
-        logger.info("Scoring events via Claude direct API")
         scored = await self._claude_score(
-            search_results=combined_results,
+            search_results=search_results,
             raw_events=raw_events,
             user_profile=user_profile,
             city=city,
         )
-
-        # Enrich events without URLs
-        top_events = scored.get("top_events", [])
-        if top_events:
-            top_events = await self._enrich_events_with_urls(top_events, city)
-            scored["top_events"] = top_events
-            scored["scored_events"] = top_events
 
         return {"output": json.dumps(scored), "status": "completed"}
 
@@ -250,56 +222,34 @@ No markdown formatting, no code blocks, no explanation text. Pure JSON only."""
             logger.error("Claude scoring failed: %s", e, exc_info=True)
             return {"top_events": [], "scored_events": []}
 
-    async def _enrich_events_with_urls(
-        self, events: list[dict], city: str
-    ) -> list[dict]:
-        """For events without URLs, search individually."""
+    async def find_event_url(self, event_title: str, city: str) -> str | None:
+        """Search for event registration URL at booking time."""
+        # Search specifically on event platforms
+        result = await self._perplexity_search(
+            f"{event_title} {city} 2026",
+            domain_filter=["lu.ma", "meetup.com", "eventbrite.com"]
+        )
+        if not result:
+            return None
 
+        # Extract URLs
+        urls = re.findall(
+            r'https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com)/[\w\-/]+',
+            result
+        )
+        if urls:
+            logger.info("Found URL for '%s': %s", event_title, urls[0])
+            return urls[0]
 
-        async def find_url(event: dict) -> dict:
-            if event.get("source_url"):
-                return event  # Already has URL
-            title = event.get("title", "")
-            query = f'"{title}" {city} event registration 2026'
-            result = await self._perplexity_search(
-                query,
-                domain_filter=["lu.ma", "meetup.com", "eventbrite.com"]
-            )
-            # Extract first URL from result
-
-            urls = re.findall(
-                r'https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com)/[\w\-/]+',
-                result
-            )
-            if urls:
-                event["source_url"] = urls[0]
-                logger.info("Found URL for '%s': %s", title, urls[0])
-                # Update source based on URL
-                if "lu.ma" in urls[0]:
-                    event["source"] = "luma"
-                elif "meetup.com" in urls[0]:
-                    event["source"] = "meetup"
-                elif "eventbrite.com" in urls[0]:
-                    event["source"] = "eventbrite"
-            return event
-
-        # Run all URL searches in parallel
-        events_without_url = [e for e in events if not e.get("source_url")]
-        logger.info("Enriching %d events without URLs", len(events_without_url))
-        if not events_without_url:
-            return events
-
-        enriched = await asyncio.gather(*[find_url(e) for e in events_without_url])
-
-        url_map = {e.get("title"): e for e in enriched}
-        result_events = []
-        for event in events:
-            title = event.get("title")
-            if title in url_map and url_map[title].get("source_url"):
-                event["source_url"] = url_map[title]["source_url"]
-                event["source"] = url_map[title].get("source", event.get("source", "perplexity"))
-            result_events.append(event)
-        return result_events
+        # Fallback: try general search
+        result2 = await self._perplexity_search(
+            f'"{event_title}" registration link 2026'
+        )
+        urls2 = re.findall(
+            r'https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com)/[\w\-/]+',
+            result2
+        )
+        return urls2[0] if urls2 else None
 
     async def run_crew(self, inputs: dict, on_progress=None) -> dict:
         """Legacy method - used by debrief and other crews via Platform."""
