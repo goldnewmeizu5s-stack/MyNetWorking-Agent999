@@ -132,7 +132,15 @@ class CrewAIClient:
         prompt = f"""You are an event discovery and scoring assistant.
 Search results about networking events in {city}:
 {search_results[:5000]}
-Pre-parsed events (may be empty): {json.dumps(raw_events[:3], ensure_ascii=False)[:500]}
+Pre-parsed events from Luma/Meetup API (these have REAL verified URLs - use them!):
+{json.dumps([{
+    "title": e.get("title"),
+    "source_url": e.get("source_url"),
+    "source_id": e.get("source_id"),
+    "datetime_start": e.get("datetime_start"),
+    "location_city": e.get("location_city"),
+    "ticket_price": e.get("ticket_price"),
+} for e in raw_events[:10]], ensure_ascii=False)[:2000]}
 User interests: {interests}
 User budget limit: EUR{budget} per ticket
 Your task: extract and score up to 5 networking events from the search results.
@@ -142,7 +150,7 @@ For each event provide these exact fields:
 - location_name: venue name as string or null
 - location_city: city name as string (always fill this)
 - ticket_price: price as number like 25.0, or null if free
-- source_url: IMPORTANT - search carefully in the search results text for any URL (lu.ma/*, eventbrite.com/*, meetup.com/*, ethglobal.com/*, etc.) related to this event. If found, include the full URL. Only use null if absolutely no URL exists in the search results.
+- source_url: If the event exists in pre_parsed_events list, use its source_url directly (it's already correct). Otherwise search carefully in the search results text for any URL (lu.ma/*, eventbrite.com/*, meetup.com/*, etc.). Only use null if absolutely no URL exists.
 - organizer_name: organizer as string or null
 - event_type: one of "conference", "meetup", "workshop", "networking_dinner", "other"
 - description: 1-2 sentence description
