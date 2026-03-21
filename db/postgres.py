@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select, update
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -99,6 +102,38 @@ class Database:
                 )
             )
             await session.commit()
+
+    async def fix_zero_coordinates(self) -> int:
+        """Find users with (0,0) coordinates and geocode by their city."""
+        from core.geocode import geocode_city
+
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(UserProfile).where(
+                    UserProfile.current_lat == 0.0,
+                    UserProfile.current_lon == 0.0,
+                )
+            )
+            users = result.scalars().all()
+            if not users:
+                return 0
+
+            fixed = 0
+            for user in users:
+                city = user.current_city
+                if not city:
+                    continue
+                coords = await geocode_city(city)
+                if coords:
+                    user.current_lat = coords[0]
+                    user.current_lon = coords[1]
+                    fixed += 1
+                    logger.info(
+                        "Fixed coordinates for user %d: %s → (%s, %s)",
+                        user.user_id, city, coords[0], coords[1],
+                    )
+            await session.commit()
+            return fixed
 
     async def update_user_interests(
         self, user_id: int, interests: list[str]

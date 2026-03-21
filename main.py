@@ -36,6 +36,14 @@ async def main():
     await db.init_db()
     logger.info("Database initialized")
 
+    # One-time fix: geocode users stuck at (0, 0)
+    try:
+        fixed = await db.fix_zero_coordinates()
+        if fixed:
+            logger.info("Fixed zero coordinates for %d user(s)", fixed)
+    except Exception as e:
+        logger.warning("fix_zero_coordinates failed: %s", e)
+
     # Initialize Redis (fallback to None if unavailable)
     redis = None
     storage = MemoryStorage()

@@ -24,9 +24,22 @@ async def handle_start(message: Message, db):
 
     # MVP: auto-create profile with defaults
     import os
+    from core.geocode import geocode_city
+
     default_city = os.environ.get("DEFAULT_CITY", "Tbilisi")
-    default_lat = float(os.environ.get("DEFAULT_LAT", "41.7151"))
-    default_lon = float(os.environ.get("DEFAULT_LON", "44.8271"))
+    env_lat = os.environ.get("DEFAULT_LAT")
+    env_lon = os.environ.get("DEFAULT_LON")
+
+    if env_lat and env_lon:
+        default_lat = float(env_lat)
+        default_lon = float(env_lon)
+    else:
+        coords = await geocode_city(default_city)
+        if coords:
+            default_lat, default_lon = coords
+        else:
+            # Tbilisi hardcoded fallback — better than 0.0, 0.0
+            default_lat, default_lon = 41.7151, 44.8271
     await db.upsert_user_profile(
         user_id=user_id,
         name=message.from_user.full_name,
