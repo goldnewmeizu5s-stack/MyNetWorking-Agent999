@@ -63,26 +63,78 @@ class EventParser:
     ) -> list[dict]:
         """Call Luma discover API - returns real events with real URLs."""
         events: list[dict] = []
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.get(
-                    "https://api.lu.ma/discover/get-events",
-                    params={
-                        "pagination_limit": 30,
-                        "geo_latitude": lat,
-                        "geo_longitude": lon,
-                    },
-                    headers={
-                        "Accept": "application/json",
-                        "User-Agent": "Mozilla/5.0",
-                    },
-                )
 
-                if resp.status_code != 200:
-                    logger.warning("Luma API status: %d", resp.status_code)
+        _BROWSER_HEADERS = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://lu.ma/discover",
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+        }
+
+        _ENDPOINTS = [
+            "https://api.lu.ma/discover/get-events",
+            "https://lu.ma/api/v2/event/get-events-for-discover",
+        ]
+
+        _PARAMS = {
+            "pagination_limit": 30,
+            "geo_latitude": lat,
+            "geo_longitude": lon,
+        }
+
+        resp = None
+        try:
+            async with httpx.AsyncClient(timeout=25) as client:
+                for i, url in enumerate(_ENDPOINTS):
+                    label = "primary" if i == 0 else "fallback"
+                    try:
+                        resp = await client.get(
+                            url, params=_PARAMS, headers=_BROWSER_HEADERS,
+                        )
+                    except httpx.TimeoutException:
+                        logger.warning("Luma %s endpoint timed out: %s", label, url)
+                        continue
+                    except httpx.ConnectError as ce:
+                        logger.warning("Luma %s connect error: %s", label, ce)
+                        continue
+
+                    logger.info(
+                        "Luma %s response: status=%d, content-type=%s, body[:200]=%s",
+                        label,
+                        resp.status_code,
+                        resp.headers.get("content-type", "?"),
+                        resp.text[:200],
+                    )
+
+                    if resp.status_code in (401, 403):
+                        logger.warning(
+                            "Luma %s returned %d, trying next endpoint",
+                            label, resp.status_code,
+                        )
+                        continue
+
+                    if resp.status_code != 200:
+                        logger.warning("Luma %s status: %d", label, resp.status_code)
+                        continue
+
+                    # Got 200 — try to parse JSON
+                    break
+                else:
+                    logger.warning("All Luma endpoints failed")
                     return []
 
-                data = resp.json()
+                try:
+                    data = resp.json()
+                except json.JSONDecodeError as je:
+                    logger.error(
+                        "Luma returned non-JSON (status=%d): %s | body[:300]=%s",
+                        resp.status_code, je, resp.text[:300],
+                    )
+                    return []
 
                 # Log raw structure to diagnose response shape in Railway logs
                 logger.info(
@@ -172,8 +224,10 @@ class EventParser:
                         "currency": "EUR",
                         "organizer_name": (ev.get("calendar") or {}).get("name") or "",
                     })
+        except (httpx.TimeoutException, httpx.ConnectError) as net_err:
+            logger.error("Luma network failure: %s", net_err)
         except Exception as e:
-            logger.warning("Luma API failed: %s", e, exc_info=True)
+            logger.error("Luma unexpected error: %s", e, exc_info=True)
 
         return events
 
