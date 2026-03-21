@@ -2,6 +2,8 @@
 import json
 import logging
 import os
+import time
+from datetime import date, timedelta
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -62,6 +64,78 @@ async def handle_clearcache(message: Message, redis=None, **kwargs):
         await message.answer(f"Cleared {count} event cache key(s).")
     except Exception as e:
         await message.answer(f"Error clearing cache: {e}")
+
+
+@router.message(Command("testparsers"))
+async def handle_testparsers(message: Message, db, event_parser=None, **kwargs):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("Admin only.")
+        return
+
+    if not event_parser:
+        await message.answer("event_parser not available.")
+        return
+
+    try:
+        profile = await db.get_user_profile(message.from_user.id)
+        if not profile:
+            await message.answer("No profile found. Use /start first.")
+            return
+
+        city = profile.current_city
+        lat = profile.current_lat
+        lon = profile.current_lon
+
+        await message.answer(
+            f"Testing parsers...\n"
+            f"City: {city}\nLat: {lat}\nLon: {lon}"
+        )
+
+        date_from = date.today()
+        date_to = date_from + timedelta(days=14)
+
+        # Call _parse_luma directly (bypass cache)
+        t0 = time.monotonic()
+        luma_events = await event_parser._parse_luma(city, lat, lon, date_from, date_to)
+        luma_sec = time.monotonic() - t0
+
+        # Call _parse_meetup directly (bypass cache)
+        t0 = time.monotonic()
+        meetup_events = await event_parser._parse_meetup(
+            lat, lon, 15, date_from, date_to, ["networking", "tech"],
+        )
+        meetup_sec = time.monotonic() - t0
+
+        # Build response
+        luma_titles = [e.get("title", "?")[:50] for e in luma_events[:3]]
+        meetup_titles = [e.get("title", "?")[:50] for e in meetup_events[:3]]
+
+        text = (
+            f"<b>Parser Test Results</b>\n\n"
+            f"<b>Input:</b> {city} ({lat}, {lon})\n"
+            f"Date range: {date_from} → {date_to}\n\n"
+            f"<b>Luma:</b> {len(luma_events)} events ({luma_sec:.1f}s)\n"
+            f"<b>Meetup:</b> {len(meetup_events)} events ({meetup_sec:.1f}s)\n"
+            f"<b>Total:</b> {len(luma_events) + len(meetup_events)}\n\n"
+        )
+
+        if luma_titles:
+            text += "<b>Luma sample:</b>\n" + "\n".join(
+                f"  • {_escape(t)}" for t in luma_titles
+            ) + "\n\n"
+
+        if meetup_titles:
+            text += "<b>Meetup sample:</b>\n" + "\n".join(
+                f"  • {_escape(t)}" for t in meetup_titles
+            ) + "\n"
+
+        if not luma_events and not meetup_events:
+            text += "⚠️ Both parsers returned 0 events. Check Railway logs."
+
+        await message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        logger.error("testparsers error: %s", e, exc_info=True)
+        await message.answer(f"Error: {_escape(str(e))}", parse_mode="HTML")
 
 
 @router.message(Command("env"))
