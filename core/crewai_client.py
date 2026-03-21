@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+from datetime import date, timedelta
 from typing import Awaitable, Callable, Optional
 
 import httpx
@@ -81,12 +82,46 @@ class CrewAIClient:
             len(all_citations), len(regex_urls), len(extracted_urls),
         )
 
+        today = date.today()
+        window_end = today + timedelta(days=30)
+
         scored = await self._claude_score(
             search_results=search_results,
             extracted_urls=extracted_urls,
             user_profile=user_profile,
             city=city,
+            date_from=today,
+            date_to=window_end,
         )
+
+        # Post-filter: drop events outside the 30-day window
+        for key in ("top_events", "scored_events"):
+            if key not in scored:
+                continue
+            original = scored[key]
+            filtered = []
+            for ev in original:
+                ds = ev.get("datetime_start")
+                if not ds or str(ds) in ("None", "null", ""):
+                    filtered.append(ev)  # keep events with unknown date
+                    continue
+                try:
+                    ev_date = date.fromisoformat(str(ds)[:10])
+                    if today <= ev_date <= window_end:
+                        filtered.append(ev)
+                    else:
+                        logger.info(
+                            "Filtered out event '%s' (date %s outside %s..%s)",
+                            ev.get("title"), ds, today, window_end,
+                        )
+                except (ValueError, TypeError):
+                    filtered.append(ev)  # keep if date is unparseable
+            scored[key] = filtered
+            if len(filtered) < len(original):
+                logger.info(
+                    "Date filter: %d → %d events in '%s'",
+                    len(original), len(filtered), key,
+                )
 
         return {"output": json.dumps(scored), "status": "completed"}
 
@@ -162,6 +197,8 @@ class CrewAIClient:
         extracted_urls: list[str],
         user_profile: dict,
         city: str,
+        date_from: date | None = None,
+        date_to: date | None = None,
     ) -> dict:
         """Call Claude API directly to parse and score events."""
         interests = user_profile.get("interests", [])
@@ -180,7 +217,8 @@ EXTRACTED URLs (pre-extracted from search results — this is the ONLY source of
 User interests: {interests}
 User budget limit: EUR{budget} per ticket
 
-Your task: extract and score up to 8 networking events from the search results.
+Your task: extract and score up to 15 networking events from the search results.
+Only include events happening between {date_from or 'today'} and {date_to or 'next 30 days'}. Exclude all events outside this date window.
 
 For each event provide these exact fields:
 - title: event name as string
@@ -207,7 +245,7 @@ Scoring guide:
 - 0-39: irrelevant to user interests
 
 Return ONLY a valid JSON object with this exact structure (no markdown, no code blocks, no explanation):
-{{"top_events": [list of up to 8 best events], "scored_events": [same list]}}"""
+{{"top_events": [list of up to 15 best events], "scored_events": [same list]}}"""
 
         try:
             async with httpx.AsyncClient(timeout=60) as client:
