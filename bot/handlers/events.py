@@ -47,37 +47,7 @@ async def handle_events(
 
     city = context["current_location"]["city"]
 
-    # 2. Try to parse events from Luma/Meetup (best-effort, non-blocking)
-    raw_events = []
-    try:
-        raw_events = await event_parser.parse_all(
-            city=city,
-            lat=context["current_location"]["lat"],
-            lon=context["current_location"]["lon"],
-            date_from=date.today(),
-            date_to=date.today() + timedelta(days=14),
-            categories=context["user_profile"].get("interests", []),
-        )
-        logger.info("Parsed %d raw events from Luma/Meetup", len(raw_events))
-    except Exception as e:
-        logger.warning("Event parsing failed (non-fatal): %s", e)
-
-    # 3. Deterministic score for pre-parsed events (fallback ranking)
-    for event in raw_events:
-        event["deterministic_score"] = scorer.calculate(
-            event=event,
-            profile=context["user_profile"],
-            transport_cost=0,
-            transport_duration_min=0,
-            calendar_free=True,
-        )
-    fallback_events = sorted(
-        raw_events,
-        key=lambda e: e.get("deterministic_score", 0),
-        reverse=True,
-    )[:5]
-
-    # 4. Run DiscoveryCrew on CrewAI Platform
+    # 2. Run DiscoveryCrew (Perplexity + Claude — single source of truth)
     await message.answer(
         f"🤖 AI is searching for events in {city}... (~20-30 seconds)"
     )
@@ -85,33 +55,25 @@ async def handle_events(
     try:
         result = await crew_tracker.run_and_track(
             crew_name="discovery",
-            coro=crewai_client.run_discovery(raw_events, context),
+            coro=crewai_client.run_discovery([], context),
             user_id=user_id,
         )
     except TimeoutError as e:
         await error_forwarder.send_error("events: CrewAI timeout", e)
-        if fallback_events:
-            await message.answer("⏳ AI search timed out. Showing direct parsing:")
-            await _show_events(message, fallback_events, city, db, user_id)
-        else:
-            await message.answer("⏳ AI search timed out. Try again later.", reply_markup=get_main_keyboard())
+        await message.answer("⏳ AI search timed out. Try again later.", reply_markup=get_main_keyboard())
         return
     except Exception as e:
         await error_forwarder.send_error("events: CrewAI call", e)
-        if fallback_events:
-            await message.answer("⚠️ AI search failed. Showing direct parsing:")
-            await _show_events(message, fallback_events, city, db, user_id)
-        else:
-            await message.answer("⚠️ Event search failed. Try again.", reply_markup=get_main_keyboard())
+        await message.answer("⚠️ Event search failed. Try again.", reply_markup=get_main_keyboard())
         return
 
-    # 5. Log raw result for debugging (not sent to user chat)
+    # 3. Log raw result for debugging (not sent to user chat)
     logger.debug(
         "CrewAI raw result: %s",
         json.dumps(result, default=str, ensure_ascii=False)[:500],
     )
 
-    # 6. Parse result — handle multiple possible formats
+    # 4. Parse result — handle multiple possible formats
     top_events = _parse_crew_result(result)
 
     if top_events is None:
@@ -120,19 +82,12 @@ async def handle_events(
             ValueError("Could not parse CrewAI result"),
             extra=json.dumps(result, default=str)[:2000],
         )
-        if fallback_events:
-            await message.answer("⚠️ Could not parse AI results. Showing direct parsing:")
-            await _show_events(message, fallback_events, city, db, user_id)
-        else:
-            await message.answer("⚠️ Could not parse results. Try again.", reply_markup=get_main_keyboard())
+        await message.answer("⚠️ Could not parse results. Try again.", reply_markup=get_main_keyboard())
         return
 
-    # 7. Show results
+    # 5. Show results
     if top_events:
         await _show_events(message, top_events, city, db, user_id)
-    elif fallback_events:
-        await message.answer("AI found no events. Showing direct parsing:")
-        await _show_events(message, fallback_events, city, db, user_id)
     else:
         await message.answer(
             f"No events found in {city}. Try /location to change city.",

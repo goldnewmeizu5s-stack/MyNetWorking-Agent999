@@ -94,29 +94,10 @@ class SchedulerManager:
         for user in users:
             try:
                 context = await self.context_builder.build(user.user_id)
-                raw_events = await self.event_parser.parse_all(
-                    city=context["current_location"]["city"],
-                    lat=context["current_location"]["lat"],
-                    lon=context["current_location"]["lon"],
-                    date_from=date.today(),
-                    date_to=date.today() + timedelta(days=14),
-                    categories=context["user_profile"].get("interests", []),
-                )
-                for event in raw_events:
-                    event["deterministic_score"] = self.scorer.calculate(
-                        event=event,
-                        profile=context["user_profile"],
-                        transport_cost=0,
-                        transport_duration_min=0,
-                        calendar_free=True,
-                    )
-                if raw_events:
-                    result = await self.crewai_client.run_discovery(
-                        raw_events, context
-                    )
-                    output = json.loads(result["output"])
-                    for event_data in output.get("top_events", []):
-                        await self.db.upsert_event(user.user_id, event_data)
+                result = await self.crewai_client.run_discovery([], context)
+                output = json.loads(result["output"])
+                for event_data in output.get("top_events", []):
+                    await self.db.upsert_event(user.user_id, event_data)
             except Exception:
                 logger.exception(
                     f"Discovery cron failed for user {user.user_id}"
