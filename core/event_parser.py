@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date
 from typing import TYPE_CHECKING
 
+logger = logging.getLogger(__name__)
+
 import httpx
-from bs4 import BeautifulSoup
 
 if TYPE_CHECKING:
     from db.redis import RedisCache
@@ -40,7 +42,7 @@ class EventParser:
         raw_events: list[dict] = []
 
         # Parse Luma
-        luma_events = await self._parse_luma(city, date_from, date_to)
+        luma_events = await self._parse_luma(city, lat, lon, date_from, date_to)
         raw_events.extend(luma_events)
 
         # Parse Meetup
@@ -59,57 +61,67 @@ class EventParser:
         return unique
 
     async def _parse_luma(
-        self, city: str, date_from: date, date_to: date
+        self, city: str, lat: float, lon: float, date_from: date, date_to: date
     ) -> list[dict]:
-        """
-        Parse lu.ma. No public API - uses requests + BeautifulSoup.
-        Falls back to Playwright subprocess for dynamic content.
-        """
+        """Call Luma discover API - returns real events with real URLs."""
         events: list[dict] = []
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.get(
-                    f"https://lu.ma/discover?city={city}",
+                    "https://api.lu.ma/discover/get-events",
+                    params={
+                        "pagination_limit": 20,
+                        "geo_latitude": lat,
+                        "geo_longitude": lon,
+                    },
                     headers={
-                        "User-Agent": (
-                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/120.0.0.0 Safari/537.36"
-                        )
+                        "Accept": "application/json",
+                        "User-Agent": "Mozilla/5.0",
                     },
                 )
-                if resp.status_code == 200:
-                    soup = BeautifulSoup(resp.text, "html.parser")
-                    # Extract event cards from Luma page
-                    for card in soup.select("[data-testid='event-card'], .event-card, .event-link"):
-                        title_el = card.select_one("h3, .event-title, [data-testid='event-title']")
-                        if not title_el:
-                            continue
-                        link = card.get("href", "")
-                        if link and not link.startswith("http"):
-                            link = f"https://lu.ma{link}"
-                        events.append({
-                            "source": "luma",
-                            "source_id": link.split("/")[-1] if link else "",
-                            "source_url": link,
-                            "title": title_el.get_text(strip=True),
-                            "description": "",
-                            "datetime_start": str(date_from),
-                            "datetime_end": None,
-                            "location_name": "",
-                            "location_address": "",
-                            "location_city": city,
-                            "location_lat": 0.0,
-                            "location_lon": 0.0,
-                            "ticket_price": None,
-                            "currency": "EUR",
-                            "organizer_name": "",
-                            "organizer_url": None,
-                            "capacity": None,
-                            "food_included": False,
-                        })
-        except Exception:
-            pass  # Luma parsing failure is non-fatal
+                if resp.status_code != 200:
+                    logger.warning("Luma API status: %d", resp.status_code)
+                    return []
+                data = resp.json()
+                # Response: {"entries": [{"event": {...}, "url": "lu.ma/xxx"}, ...]}
+                entries = data.get("entries", [])
+                logger.info("Luma API returned %d entries", len(entries))
+                for entry in entries:
+                    ev = entry.get("event", {})
+                    if not ev:
+                        continue
+                    # Build full URL
+                    slug = entry.get("url") or ev.get("url") or ""
+                    if slug and not slug.startswith("http"):
+                        full_url = f"https://lu.ma/{slug}"
+                    elif slug.startswith("http"):
+                        full_url = slug
+                    else:
+                        full_url = ""
+                    # Parse ticket price
+                    ticket_price = None
+                    ticket_info = ev.get("ticket_info") or {}
+                    if ticket_info.get("is_free"):
+                        ticket_price = None  # free
+                    elif ticket_info.get("min_price"):
+                        ticket_price = float(ticket_info["min_price"]) / 100  # cents to EUR
+                    # Parse datetime
+                    dt_start = ev.get("start_at") or ev.get("start_time") or str(date_from)
+                    events.append({
+                        "source": "luma",
+                        "source_id": ev.get("api_id") or ev.get("id") or slug or "",
+                        "source_url": full_url,
+                        "title": ev.get("name") or ev.get("title") or "",
+                        "description": ev.get("description") or "",
+                        "datetime_start": dt_start,
+                        "location_name": (ev.get("geo_address_info") or {}).get("full_address") or "",
+                        "location_city": (ev.get("geo_address_info") or {}).get("city") or city,
+                        "ticket_price": ticket_price,
+                        "currency": "EUR",
+                        "organizer_name": (ev.get("calendar") or {}).get("name") or "",
+                    })
+        except Exception as e:
+            logger.warning("Luma API failed: %s", e)
         return events
 
     async def _parse_meetup(
