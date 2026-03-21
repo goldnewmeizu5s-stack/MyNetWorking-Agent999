@@ -31,6 +31,11 @@ class CrewAIClient:
         self._perplexity_key = os.environ.get("PERPLEXITY_API_KEY", "")
         self._anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
+    _URL_RE = re.compile(
+        r"https?://(?:lu\.ma|(?:www\.)?meetup\.com|(?:www\.)?eventbrite\.com|ethglobal\.com)"
+        r"/[\w\-/.?=&%#@!+]+"
+    )
+
     async def run_discovery(self, raw_events: list, context: dict) -> dict:
         """Run discovery: parallel Perplexity searches + Claude scoring."""
         user_profile = context.get("user_profile", {})
@@ -40,21 +45,29 @@ class CrewAIClient:
 
         logger.info("Perplexity parallel search for %s in %s", interests_str, city)
 
-        search1, search2 = await asyncio.gather(
+        search1, search2, search3 = await asyncio.gather(
             self._perplexity_search(
                 f"upcoming networking events {interests_str} in {city} 2026"
             ),
             self._perplexity_search(
                 f"tech conference meetup AI startups {city} April May June 2026"
             ),
+            self._perplexity_search(
+                f"meetup.com events networking {city} 2026",
+                domain_filter=["meetup.com"],
+            ),
         )
 
-        search_results = "\n\n".join(filter(None, [search1, search2]))
+        search_results = "\n\n".join(filter(None, [search1, search2, search3]))
         logger.info("Search results: %d chars total", len(search_results))
+
+        # Pre-extract all event URLs before sending to Claude
+        extracted_urls = list(dict.fromkeys(self._URL_RE.findall(search_results)))
+        logger.info("Extracted %d unique URLs from search results", len(extracted_urls))
 
         scored = await self._claude_score(
             search_results=search_results,
-            raw_events=raw_events,
+            extracted_urls=extracted_urls,
             user_profile=user_profile,
             city=city,
         )
@@ -128,7 +141,7 @@ class CrewAIClient:
     async def _claude_score(
         self,
         search_results: str,
-        raw_events: list,
+        extracted_urls: list[str],
         user_profile: dict,
         city: str,
     ) -> dict:
@@ -136,25 +149,15 @@ class CrewAIClient:
         interests = user_profile.get("interests", [])
         budget = user_profile.get("budget_limit_ticket", 100)
 
-        pre_parsed = [
-            {
-                "title": e.get("title"),
-                "source_url": e.get("source_url"),
-                "source_id": e.get("source_id"),
-                "datetime_start": e.get("datetime_start"),
-                "location_city": e.get("location_city"),
-                "ticket_price": e.get("ticket_price"),
-            }
-            for e in raw_events[:10]
-        ]
+        urls_block = "\n".join(f"  - {u}" for u in extracted_urls) if extracted_urls else "  (none found)"
 
         prompt = f"""You are an event discovery and scoring assistant.
 
 Search results about networking events in {city}:
 {search_results[:6000]}
 
-Pre-parsed events from Luma/Meetup API (these have REAL verified URLs — always use source_url from here if the title matches):
-{json.dumps(pre_parsed, ensure_ascii=False)[:2000]}
+EXTRACTED URLs (pre-extracted from search results — this is the ONLY source of truth for URLs):
+{urls_block}
 
 User interests: {interests}
 User budget limit: EUR{budget} per ticket
@@ -167,7 +170,7 @@ For each event provide these exact fields:
 - location_name: venue name as string or null
 - location_city: city name as string (always fill this)
 - ticket_price: price as number like 25.0, or null if free
-- source_url: If the event title matches one in pre_parsed_events, copy its source_url exactly. Otherwise search carefully in the search results text for any URL (lu.ma/*, eventbrite.com/*, meetup.com/*, ethglobal.com/*, etc.). Use null only if absolutely no URL exists anywhere.
+- source_url: Use URLs ONLY from the EXTRACTED URLs list above. Match each event to the most relevant URL from that list. Do not invent or guess URLs. If no URL from the list matches this event, set source_url to null.
 - organizer_name: organizer as string or null
 - event_type: one of "conference", "meetup", "workshop", "networking_dinner", "other"
 - description: 1-2 sentence description
