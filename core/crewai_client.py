@@ -46,7 +46,7 @@ class CrewAIClient:
 
         logger.info("Perplexity parallel search for %s in %s", interests_str, city)
 
-        search1, search2, search3 = await asyncio.gather(
+        results = await asyncio.gather(
             self._perplexity_search(
                 f"upcoming networking events {interests_str} in {city} 2026"
             ),
@@ -59,21 +59,27 @@ class CrewAIClient:
             ),
         )
 
-        # Log previews to understand Perplexity response format
-        logger.info("Perplexity search1 preview: %s", search1[:500])
-        logger.info("Perplexity search2 preview: %s", search2[:500])
-        logger.info("Perplexity search3 preview: %s", search3[:500])
+        # Unpack (content, citations) tuples
+        texts = []
+        all_citations: list[str] = []
+        for i, (content, citations) in enumerate(results, 1):
+            logger.info("Perplexity search%d preview: %s", i, content[:500])
+            logger.info("Perplexity search%d citations (%d): %s", i, len(citations), citations)
+            texts.append(content)
+            all_citations.extend(citations)
 
-        search_results = "\n\n".join(filter(None, [search1, search2, search3]))
+        search_results = "\n\n".join(filter(None, texts))
         logger.info("Search results: %d chars total", len(search_results))
 
-        # Pre-extract all event URLs before sending to Claude
-        # Normalize: add https:// to bare domain matches (lu.ma/..., meetup.com/...)
+        # Primary: use Perplexity citations (real source URLs)
+        # Fallback: regex-extract from text for any URLs not in citations
         raw_urls = self._URL_RE.findall(search_results)
-        extracted_urls = list(dict.fromkeys(
-            u if u.startswith("http") else f"https://{u}" for u in raw_urls
-        ))
-        logger.info("Extracted %d unique URLs from search results", len(extracted_urls))
+        regex_urls = [u if u.startswith("http") else f"https://{u}" for u in raw_urls]
+        extracted_urls = list(dict.fromkeys(all_citations + regex_urls))
+        logger.info(
+            "URLs: %d from citations + %d from regex = %d unique",
+            len(all_citations), len(regex_urls), len(extracted_urls),
+        )
 
         scored = await self._claude_score(
             search_results=search_results,
@@ -123,8 +129,8 @@ class CrewAIClient:
 
     async def _perplexity_search(
         self, query: str, domain_filter: list[str] | None = None
-    ) -> str:
-        """Call Perplexity Sonar API directly."""
+    ) -> tuple[str, list[str]]:
+        """Call Perplexity Sonar API. Returns (content, citations)."""
         try:
             payload: dict = {
                 "model": "sonar",
@@ -143,10 +149,12 @@ class CrewAIClient:
                     json=payload,
                 )
                 data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                content = data["choices"][0]["message"]["content"]
+                citations = data.get("citations", [])
+                return content, citations
         except Exception as e:
             logger.warning("Perplexity search failed: %s", e)
-            return ""
+            return "", []
 
     async def _claude_score(
         self,
@@ -275,34 +283,46 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no code 
         )
 
         # Attempt 1: domain-filtered search with 5-word title
-        r1 = await self._perplexity_search(
+        content1, citations1 = await self._perplexity_search(
             f"{short_title} {city} event 2026",
             domain_filter=["lu.ma", "meetup.com", "eventbrite.com"],
         )
-        urls = url_pattern.findall(r1)
+        for u in citations1:
+            if url_pattern.search(u):
+                logger.info("Found URL (attempt 1, citation): %s", u)
+                return u
+        urls = url_pattern.findall(content1)
         if urls:
-            logger.info("Found URL (attempt 1): %s", urls[0])
+            logger.info("Found URL (attempt 1, text): %s", urls[0])
             return urls[0]
 
         # Attempt 2: broader search without domain filter
-        r2 = await self._perplexity_search(
+        content2, citations2 = await self._perplexity_search(
             f"{short_title} {city} registration 2026"
         )
-        urls = url_pattern.findall(r2)
+        for u in citations2:
+            if url_pattern.search(u):
+                logger.info("Found URL (attempt 2, citation): %s", u)
+                return u
+        urls = url_pattern.findall(content2)
         if urls:
-            logger.info("Found URL (attempt 2): %s", urls[0])
+            logger.info("Found URL (attempt 2, text): %s", urls[0])
             return urls[0]
 
         # Attempt 3: ultra-short 3-word title
         if len(words) > 3:
             ultra_short = " ".join(words[:3])
-            r3 = await self._perplexity_search(
+            content3, citations3 = await self._perplexity_search(
                 f"{ultra_short} {city} 2026",
                 domain_filter=["lu.ma", "meetup.com", "eventbrite.com"],
             )
-            urls = url_pattern.findall(r3)
+            for u in citations3:
+                if url_pattern.search(u):
+                    logger.info("Found URL (attempt 3, citation): %s", u)
+                    return u
+            urls = url_pattern.findall(content3)
             if urls:
-                logger.info("Found URL (attempt 3): %s", urls[0])
+                logger.info("Found URL (attempt 3, text): %s", urls[0])
                 return urls[0]
 
         logger.warning("No URL found for '%s' after 3 attempts", event_title)
